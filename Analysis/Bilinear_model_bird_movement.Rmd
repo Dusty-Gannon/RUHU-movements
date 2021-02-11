@@ -1,0 +1,584 @@
+---
+title: "Sender-receiver Poisson model fit"
+author: "D. G. Gannon"
+date: "October 2020"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#packages
+  require(rstan)
+  require(loo)
+  require(igraph)
+  require(raster)
+  require(ggplot2)
+  require(gridExtra)
+  require(here)
+  require(tidyverse)
+  
+
+
+# function to fill square matrix by rows and skip the diagonal
+
+ fill_Amat <- function(x,dim){
+  A_nodi <- matrix(x, nrow = dim, ncol = dim-1, byrow = T)
+  A <- matrix(nrow = dim, ncol = dim)
+  for(i in 1:nrow(A_nodi)){
+    if(i>1){
+     for(j in 1:(i-1)){
+       A[i,j] <- A_nodi[i,j]
+     }
+    }
+    if(i+1 <= dim){
+      for(k in (i+1):dim){
+        A[i,k] <- A_nodi[i,(k-1)]
+      }
+   }
+  }
+  return(A)
+ }
+ 
+ check_energy <- function(fit, quiet=FALSE) {
+  sampler_params <- get_sampler_params(fit, inc_warmup=FALSE)
+  no_warning <- TRUE
+  for (n in 1:length(sampler_params)) {
+    energies = sampler_params[n][[1]][,'energy__']
+    numer = sum(diff(energies)**2) / length(energies)
+    denom = var(energies)
+    if (numer / denom < 0.2) {
+      if (!quiet) print(sprintf('Chain %s: E-FMI = %s', n, numer / denom))
+      no_warning <- FALSE
+    }
+  }
+  if (no_warning) {
+    if (!quiet) print('E-FMI indicated no pathological behavior')
+    if (quiet) return(TRUE)
+  } else {
+    if (!quiet) print('  E-FMI below 0.2 indicates you may need to reparameterize your model')
+    if (quiet) return(FALSE)
+  }
+}
+
+```
+
+Let $y_{i,j,k} \in \mathbb{N}^+$ be the number of movements detected between readers $i$ and $j$ by hummingbirds in year $k$, where $i \ne j = 1,2,...,R$. Following @hoff2005b, we model the number of movements in a bilinear model:
+
+$$
+ \log (\lambda_{i,j,k}) =  {\bf x}_{ij}\boldsymbol \beta + u_i + w_j + \gamma_{ij} + \eta_k + \log(d_k)
+$$
+where ${\boldsymbol \beta}$ is a vector of dyad specific effects with ${\bf x}_{i,j}$ the vector of dyad-specific regressors for dyad $\{i,j\}$, ${\bm \beta}_s$. The effects $u_i$ and $w_i$ are the average effects of reader $i$ as a sender and receiver (respectively), and $v_{i,b}$ and term $\gamma_{i,j}$ is an average effect on movement for the pair of readers $\{i,j\}$. Finally, $\eta_k$ is the effect of a given year, accounting for good years and bad years for hummingbirds, and $d_k$ is an offset for the number of days the readers were maintained in year $k$.
+
+To induce dependence among observations that involve reader $i$, we assume
+
+$$
+\begin{split}
+\begin{bmatrix}
+u_i \\
+w_i
+\end{bmatrix} \sim \mathcal{N}\left({\bf 0},\ {\boldsymbol \Sigma}_{uw} \right),\\
+{\boldsymbol \Sigma}_{uw} = \begin{bmatrix}
+\sigma_{u}^2 & \sigma_{uw}\\
+\sigma_{uw} & \sigma_w^2
+\end{bmatrix},
+\end{split}
+$$
+
+such that observations that have a common sender or receiver may be correlated. Importantly, this allows for the potential that good senders may be poor receivers, so negative correlation is a possibility. Finally, let
+
+$$
+\begin{split}
+\begin{bmatrix}
+\gamma_{i,j}\\
+\gamma_{j,i}
+\end{bmatrix} \sim \mathcal{N}({\bf 0},\ {\boldsymbol \Sigma}_\gamma),\\
+{\boldsymbol \Sigma}_\gamma = \begin{bmatrix}
+\sigma_\gamma^2 & \rho\sigma_\gamma^2\\
+\rho\sigma_\gamma^2 & \sigma_\gamma^2
+\end{bmatrix},
+\end{split}
+$$
+
+where $\rho$ is the correlation between the rate of movement from $i\to j$ and $j \to i$. These differ from standard random effects models because they allow for negative correlation of the observations within a dyad.
+
+
+
+```{stan output.var="soc_net_poisson", eval=FALSE}
+
+data{
+
+  int<lower=0> N;             //number of observations (edges*years)
+  int<lower=0> R;             //number of nodes (readers)
+  int<lower=0> D;             //number of dyads
+  int<lower=0> P;             //number of fixed effects
+  int<lower=0> S;             //number of years
+  
+  int<lower=0,upper=R> r1[N];     //reader 1 index
+  int<lower=0,upper=R> r2[N];     //reader 2 index
+  int<lower=0,upper=D> dyad[N];   //index for the dyad
+  int<lower=0> order[N];          //order for the dyad
+  int<lower=0> yr[N];             //index for the year
+  
+  matrix[N,P] X;                  //fixed effects model matrix
+  real<lower=0> offset[N];        //number of days connections were active
+  int<lower=0> y[N];              //number of movements
+
+}
+
+parameters{
+
+  vector[P] beta;                //regression parameters
+  vector[2] u_raw[R];                //random effects for sender/receiver
+  vector[2] gamma_raw[D];            //random effects for the dyad
+  real eta[S];                     // random effects for the year
+  
+  vector<lower=0>[2] sigma_u;            //scale for sender/receiver effects
+  cholesky_factor_corr[2] L_omega_u;
+  
+  real<lower=0> sigma_gamma;        //scale for dyad effects
+  cholesky_factor_corr[2] L_omega_gamma;
+  
+  real<lower=0> sigma_eta;           //scale for year variation
+     
+}
+
+transformed parameters{
+
+  vector[2] u[R];                
+  vector[2] gamma[D];
+  real<lower=0> lambda[N];
+  
+  for(r in 1:R){
+    u[r] = diag_pre_multiply(sigma_u, L_omega_u)*u_raw[r];
+  }
+  
+  for(d in 1:D){
+    gamma[d] = diag_pre_multiply(rep_vector(sigma_gamma,2),
+                  L_omega_gamma)*gamma_raw[d];
+  }
+  
+  //create linear predictor
+  for(i in 1:N){
+    lambda[i] = exp(X[i,]*beta + u[r1[i],1] + u[r2[i],2] +
+                    gamma[dyad[i],order[i]] + eta[yr[i]]*sigma_eta 
+                    + log(offset[i]));
+  }
+  
+}
+
+model{
+
+  //priors
+  beta ~ normal(0,1);
+  sigma_u ~ normal(0,2);
+  sigma_gamma ~ normal(0,2);
+  sigma_eta ~ normal(0,2);
+  L_omega_u ~ lkj_corr_cholesky(5);
+  L_omega_gamma ~ lkj_corr_cholesky(5);
+  
+  
+  //model
+  for(r in 1:R){
+    u_raw[r] ~ std_normal();
+  }
+
+  for(d in 1:D){
+    gamma_raw[d] ~ std_normal(); 
+  }
+  
+  eta ~ std_normal();
+  
+  for(i in 1:N){
+    y[i] ~ poisson(lambda[i]);
+  }
+
+
+}
+
+generated quantities{
+
+  vector[N] log_lik;
+  vector[N] y_hat;
+  matrix[2,2] omega_u;
+  matrix[2,2] omega_gamma;
+  
+  omega_u = L_omega_u*L_omega_u';
+  omega_gamma = L_omega_gamma*L_omega_gamma';
+  
+  for(i in 1:N){
+    log_lik[i] = poisson_lpmf(y[i] | lambda[i]);
+    y_hat[i] = poisson_rng(lambda[i]);
+  }
+
+}
+
+
+```
+
+### Allowing for auto-regressive random effects for years
+
+```{stan output.var="soc_net_poisson_ar", eval=FALSE}
+
+data{
+
+  int<lower=0> N;             //number of observations (edges)
+  int<lower=0> R;             //number of nodes (readers)
+  int<lower=0> D;             //number of dyads
+  int<lower=0> P;             //number of fixed effects
+  int<lower=0> S;             //number of years
+  
+  int<lower=0,upper=R> r1[N];     //reader 1 index
+  int<lower=0,upper=R> r2[N];     //reader 2 index
+  int<lower=0,upper=D> dyad[N];   //index for the dyad
+  int<lower=0> order[N];
+  int<lower=0> yr[N];             //index for the year
+  
+  matrix[N,P] X;                  //fixed effects model matrix
+  real<lower=0> offset[N];        //number of days connections were active
+  int<lower=0> y[N];              //number of movements
+
+}
+
+transformed data{
+
+  matrix[S,S] I_S;
+  
+  I_S = diag_matrix(rep_vector(1,S));
+
+}
+
+parameters{
+
+  vector[P] beta;                //regression parameters
+  vector[2] u[R];                //random effects for sender/receiver
+  vector[2] gamma[D];            //random effects for the dyad
+  vector[S] w;                     // random effects for the year
+  
+  vector<lower=0>[2] sigma_u;            //scale for sender/receiver effects
+  corr_matrix[2] omega_u;
+  
+  real<lower=0> sigma_gamma;        //scale for dyad effects
+  corr_matrix[2] omega_gamma;
+  
+  real<lower=0> sigma_w;           //scale for year variation
+  real<lower=0,upper=1> rho;       //temporal autocorrelation
+    
+}
+
+transformed parameters{
+
+  real<lower=0> lambda[N];
+  matrix[S,S] Sigma_w_lt;
+  
+  Sigma_w_lt = I_S;
+  for(i in 1:S){
+    for(j in 1:i){
+      Sigma_w_lt[i,j] = Sigma_w_lt[i,j]*(rho^(i-j));
+    }
+  }
+  
+  //create linear predictor
+  for(i in 1:N){
+    lambda[i] = exp(X[i,]*beta + u[r1[i],1] + u[r2[i],2] +
+                    gamma[dyad[i],order[i]] + w[yr[i]] 
+                    + log(offset[i]));
+  }
+  
+}
+
+model{
+
+  //priors
+  beta ~ normal(0,1);
+  sigma_u ~ normal(0,1);
+  sigma_gamma ~ normal(0,1);
+  sigma_w ~ normal(0,2);
+  omega_u ~ lkj_corr(5);
+  omega_gamma ~ lkj_corr(5);
+  
+  
+  //model
+  for(r in 1:R){
+    u[r] ~ multi_normal(rep_vector(0,2), quad_form_diag(omega_u, sigma_u));
+  }
+
+  for(d in 1:D){
+    gamma[d] ~ multi_normal(rep_vector(0,2), quad_form_diag(omega_gamma, rep_vector(sigma_gamma,2))); 
+  }
+  
+  w ~ multi_normal(rep_vector(0,S),
+  ((sigma_w^2)*(Sigma_w_lt*Sigma_w_lt' - (Sigma_w_lt -I_S)*(Sigma_w_lt -I_S)')));
+  
+  for(i in 1:N){
+    y[i] ~ poisson(lambda[i]);
+  }
+
+
+}
+
+generated quantities{
+
+  vector[N] log_lik;
+  vector[N] y_hat;
+  
+  for(i in 1:N){
+    log_lik[i] = poisson_lpmf(y[i] | lambda[i]);
+    y_hat[i] = poisson_rng(lambda[i]);
+  }
+
+}
+
+```
+
+
+
+```{r}
+
+  mvmnts <- read.table(file = here("Data","total_movements_by_year.tsv"), 
+                       header = T, as.is = T, sep = "\t")
+  
+  rlocs <- read.table(file = here("Data", "hja_reader_locations_centercomb.txt"),
+                      header = T, sep = "\t")
+  rdrs <- rlocs$reader
+
+# create a column for the order
+  #if the position for reader 1 > reader 2, order=1
+ mvmnts$order <- NA
+ for(i in 1:nrow(mvmnts)){
+   r1 <- which(rdrs == mvmnts$reader_i[i])
+   r2 <- which(rdrs == mvmnts$reader_j[i])
+   if(r1 < r2){
+     mvmnts$order[i] <- 1
+   } else{
+     mvmnts$order[i] <- 2
+   }
+ }
+ 
+# indicator variables for whether a reader is inside the forest
+ mvmnts$forest_i <- 0
+ mvmnts$forest_i[which(mvmnts$hab_i == "forest")] <- 1
+ 
+ mvmnts$forest_j <- 0
+ mvmnts$forest_j[which(mvmnts$hab_j == "forest")] <- 1
+ 
+ mvmnts$forest_ij <- with(mvmnts,
+                          (forest_i + forest_j)/2)
+ 
+```
+
+
+```{r model fit}
+
+  N <- nrow(mvmnts)
+  y <- mvmnts$count
+  X <- model.matrix(~ forest_i + forest_j + dist_ij + pfor_ij, data = mvmnts)
+  
+  P <- dim(X)[2]
+  ord <- mvmnts$order
+  dyad <- as.integer(as.factor(mvmnts$dyad))
+  D <- length(unique(dyad))
+  
+  r1 <- as.integer(factor(mvmnts$reader_i, levels = rdrs))
+  r2 <- as.integer(factor(mvmnts$reader_j, levels = rdrs))
+  R <- length(unique(r1))
+  os <- (mvmnts$active_days)/7
+  
+   year <- as.integer(factor(mvmnts$year))
+   S <- length(unique(year))
+  
+  mod.data <- list(N=N, P=P, R=R, D=D, r1=r1,
+                   S=S, yr=year,
+                   r2=r2, dyad=dyad, order=ord,
+                   X=X, offset=os, y=y)
+  
+  fit <- sampling(soc_net_poisson, data=mod.data, chains=2, control=list(adapt_delta=0.9), init=0)
+  # fit_ar <- sampling(soc_net_poisson_ar, data=mod.data, chains=2, control=list(adapt_delta=0.9, max_treedepth=12),
+  #                    init=0)
+  
+  
+
+```
+
+```{r}
+
+ loglik1 <- extract_log_lik(fit, merge_chains = F)
+ reff1 <- relative_eff(exp(loglik1))
+ fit_loo1 <- loo(loglik1, r_eff = reff1)
+ 
+# AR
+ loglik2 <- extract_log_lik(fit_ar, merge_chains = F)
+ reff2 <- relative_eff(exp(loglik2))
+ fit_loo2 <- loo(loglik2, r_eff = reff2)
+
+```
+
+```{r save fit, echo=FALSE, eval=FALSE}
+
+ save(fit, fit_loo1, mod.data,
+      file = here("Data", "fit_sender_receiver.RData"))
+
+```
+
+```{r load fit, echo=FALSE}
+load( here("Data", "fit_sender_receiver.RData"))
+```
+
+
+```{r}
+
+# colors for plot
+ forest.col <- rgb(229,229,220, maxColorValue = 255)
+ nonforest.col <- rgb(255,255,255, maxColorValue = 255)
+ rdr.col <- rgb(252,163,17, maxColorValue = 255)
+ edge.col <- rgb(20,33,61, maxColorValue = 255)
+ # cuts <- c(-1,0.5,1.5)
+ # pal <- colorRampPalette(c(nonforest.col, forest.col))
+ 
+# load forest raster
+ #forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
+
+ y.hat <- as.data.frame(rstan::extract(fit, pars="y_hat"))
+
+ E_y.hat <- apply(y.hat, 2, mean)
+ 
+# create aggregated counts
+ mv_counts <- data.frame(edge=paste(mvmnts$reader_i, mvmnts$reader_j, sep = "-"),
+                         obs_count=mvmnts$count,
+                         pred_count=E_y.hat)
+ 
+ mvs_all <- group_by(mv_counts, edge) %>% summarise(., obs=sum(obs_count), pred=sum(pred_count))
+ 
+# Create observed and predicted adjacency matrices
+ Amat_pred <- fill_Amat(mvs_all$pred, dim=R)
+ Amat_obs <- fill_Amat(mvs_all$obs, dim=R)
+ 
+ rownames(Amat_pred) <- rlocs$reader
+ colnames(Amat_pred) <- rlocs$reader
+ rownames(Amat_obs) <- rlocs$reader
+ colnames(Amat_obs) <- rlocs$reader
+ 
+ g_pred <- graph_from_adjacency_matrix(Amat_pred, mode = "directed", weighted = T, diag = F)
+ g_pred <- set_vertex_attr(g_pred, "x", value = rlocs$x)
+ g_pred <- set_vertex_attr(g_pred, "y", value=rlocs$y)
+ E(g_pred)$width <- log(E(g_pred)$weight + 1)
+ E(g_pred)$arrow.size <- 0.1
+ E(g_pred)$color <- edge.col
+ V(g_pred)$size <- 5
+ V(g_pred)$label <- NA
+ V(g_pred)$color <- rdr.col
+ 
+ 
+ g_obs <- graph_from_adjacency_matrix(Amat_obs, mode = "directed", weighted = T, diag = F)
+ V(g_obs)$x <- rlocs$x
+ V(g_obs)$y <- rlocs$y
+ E(g_obs)$width <- log(E(g_obs)$weight + 1)
+ E(g_obs)$arrow.size <- 0.2
+ E(g_obs)$color <- edge.col
+ V(g_obs)$label <- NA
+ V(g_obs)$size <- 5
+ V(g_obs)$color <- rdr.col
+ 
+png(filename = here("Figures", "post_pred_fig.png"),
+    height = 1800, width = 3600, res = 300)
+ par(mfrow=c(1,2), mar=c(1,2,2,1))
+ plot(g_obs, frame=T)
+ title(main = "Observed movements", cex.main=1, adj=0)
+ plot(g_pred, frame=T)
+ title(main = "Posterior predictive movement rates",
+       cex.main=1, adj=0)
+ dev.off()
+  
+```
+
+\subsection{Computing observed and predicted network metrics}
+
+```{r node strength}
+
+ pred.col <- rgb(229,229,220, maxColorValue = 255)
+ obs.col <- rgb(252,163,17, maxColorValue = 255)
+ interval.col <- rgb(20,33,61, maxColorValue = 255)
+
+# incoming strength
+
+  obs_instr <- apply(Amat_obs, 2, sum, na.rm=T)
+
+  pp_instr <- matrix(nrow = nrow(y.hat), ncol = R)
+  colnames(pp_instr) <- colnames(Amat_obs)
+  for(i in 1:nrow(pp_instr)){
+    yhat_i <- as.double(y.hat[i, ])
+    Amat_i <- fill_Amat(yhat_i, dim = R)
+    pp_instr[i,] <- apply(Amat_i, 2, sum, na.rm=T)
+  }
+
+  instr_df <- data.frame(reader=colnames(Amat_obs),
+                         obs_instr = obs_instr/(rlocs$days_active/7),
+                         mean_pred = apply(pp_instr,2,mean)/(rlocs$days_active/7),
+                         low_pred=apply(pp_instr,2,quantile, probs=0.025)/(rlocs$days_active/7),
+                         high_pred=apply(pp_instr,2,quantile, probs=0.975)/(rlocs$days_active/7))
+  instr_df$reader <- factor(instr_df$reader, 
+                            levels = colnames(Amat_obs)[order(instr_df$mean_pred)])
+  
+  graph_mets_theme <- theme(panel.background = element_blank(),
+                            axis.line = element_line(colour = "black"),
+                            axis.text.x = element_text(colour = "white"))
+  
+  
+  instr_plot <- ggplot(data = instr_df)+
+    geom_errorbar(aes(x=reader, ymin=low_pred, ymax=high_pred),
+                  width=0.2, size=1.5, color=alpha(interval.col, alpha = 0.95))+
+    geom_point(aes(x=reader, y=mean_pred), size=4, color="white")+
+    geom_point(aes(x=reader, y=mean_pred), size=3.5, color="black")+
+    geom_point(aes(x=reader,y=obs_instr), size=2, color=obs.col,
+               shape=18)+
+    graph_mets_theme+
+    xlab("")+
+    ylab("Incoming movements per week")
+  
+  
+# Outgoing strength
+  obs_outstr <- apply(Amat_obs, 1, sum, na.rm=T)
+
+  pp_outstr <- matrix(nrow = nrow(y.hat), ncol = R)
+  colnames(pp_outstr) <- rownames(Amat_obs)
+  for(i in 1:nrow(pp_outstr)){
+    yhat_i <- as.double(y.hat[i, ])
+    Amat_i <- fill_Amat(yhat_i, dim = R)
+    pp_outstr[i,] <- apply(Amat_i, 1, sum, na.rm=T)
+  }
+
+  outstr_df <- data.frame(reader=colnames(Amat_obs),
+                         obs_outstr = obs_outstr/(rlocs$days_active/7),
+                         mean_pred = apply(pp_outstr,2,mean)/(rlocs$days_active/7),
+                         low_pred=apply(pp_outstr,2,quantile, probs=0.025)/(rlocs$days_active/7),
+                         high_pred=apply(pp_outstr,2,quantile, probs=0.975)/(rlocs$days_active/7))
+  outstr_df$reader <- factor(outstr_df$reader, 
+                            levels = colnames(Amat_obs)[order(outstr_df$mean_pred)])
+  
+  outstr_plot <- ggplot(data = outstr_df)+
+    geom_errorbar(aes(x=reader, ymin=low_pred, ymax=high_pred),
+                  width=0.2, size=1.5, color=alpha(interval.col, alpha = 0.95))+
+    geom_point(aes(x=reader, y=mean_pred), size=4, color="white")+
+    geom_point(aes(x=reader, y=mean_pred), size=3.5, color="black")+
+    geom_point(aes(x=reader,y=obs_outstr), size=2, color=obs.col,
+               shape=18)+
+    graph_mets_theme+
+    xlab("")+
+    ylab("Outgoing movements per week")
+  
+  
+  grid.arrange(instr_plot, outstr_plot, nrow=2)
+
+```
+
+
+
+
+
+
+
+
+

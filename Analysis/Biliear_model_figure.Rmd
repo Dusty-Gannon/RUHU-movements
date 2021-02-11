@@ -1,0 +1,274 @@
+---
+title: "Bilinear_model_figure"
+author: "D. G. Gannon"
+date: "9/8/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Packages
+  require(igraph)
+  require(ggplot2)
+  require(rstan)
+  require(raster)
+  require(dplyr)
+
+# Functions
+ fill_Amat <- function(x,dim){
+  A_nodi <- matrix(x, nrow = dim, ncol = dim-1, byrow = T)
+  A <- matrix(nrow = dim, ncol = dim)
+  for(i in 1:nrow(A_nodi)){
+    if(i>1){
+     for(j in 1:(i-1)){
+       A[i,j] <- A_nodi[i,j]
+     }
+    }
+    if(i+1 <= dim){
+      for(k in (i+1):dim){
+        A[i,k] <- A_nodi[i,(k-1)]
+      }
+   }
+  }
+  return(A)
+ }
+
+```
+
+```{r}
+
+  load("~/Documents/Columbine/Analysis/Bird_movements/Bilinear_dyad_models/fit_sender_receiver.RData")
+
+#reader locations
+  rlocs <- read.table("~/Documents/Columbine/Data/Bird_data/hja_reader_locations_centercomb.txt", header = T, sep = "\t")
+  
+# observed movements
+  mvmnts <- read.table("~/Documents/Columbine/Data/Bird_data/total_movements_by_year.tsv",
+                       header = T, sep = "\t", as.is = T)
+  
+  mvmnts$complex_i <- str_remove(mvmnts$reader_i, pattern = "_[[:alpha:]]+")
+  mvmnts$complex_j <- str_remove(mvmnts$reader_j, pattern = "_[[:alpha:]]+")
+  
+# forest raster
+  forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
+  forest_df <- as.data.frame(forest, xy=T)
+
+```
+
+
+
+```{r}
+# colors for plot
+ forest.col1 <- "grey" 
+ forest.col2 <- rgb(129,178,154, maxColorValue = 255)
+ highlight <- rgb(242,204,143, maxColorValue = 255)
+ nonforest.col <- rgb(244,241,222, maxColorValue = 255)
+ rdr.col <- rgb(224,122,95, maxColorValue = 255)
+ edge.col <- "black" #rgb(61,64,91, maxColorValue = 255)
+
+# create aggregated counts
+ mv_counts <- data.frame(edge=paste(mvmnts$reader_i, mvmnts$reader_j, sep = "-"),
+                         obs_count=mvmnts$count)
+ 
+ mvs_all <- group_by(mv_counts, edge) %>% summarise(., obs=sum(obs_count))
+ mvs_all_df <- as.data.frame(str_split(mvs_all$edge, pattern = "-", simplify = T))
+ names(mvs_all_df) <- c("reader_i", "reader_j")
+ mvs_all_df$obs <- mvs_all$obs
+ 
+#merge in location data
+ mvs_all_df <- merge(mvs_all_df, rlocs[,c(1,4,5)], by.x="reader_i", by.y="reader")
+ names(mvs_all_df)[which(names(mvs_all_df) == "x")] <- "x_i"
+ names(mvs_all_df)[which(names(mvs_all_df) == "y")] <- "y_i"
+ 
+ mvs_all_df <- merge(mvs_all_df, rlocs[,c(1,4,5)], by.x="reader_j", by.y="reader")
+ names(mvs_all_df)[which(names(mvs_all_df) == "x")] <- "x_j"
+ names(mvs_all_df)[which(names(mvs_all_df) == "y")] <- "y_j"
+ 
+# Create figure
+ 
+ graph_plot <- ggplot()+
+   geom_raster(data = forest_df, aes(x=x, y=y, fill=as.factor(forest)))+
+   geom_segment(data = mvs_all_df, 
+                aes(x=x_i, xend=x_j, y=y_i, yend=y_j),
+                lineend = "round", size=mvs_all_df$obs/max(mvs_all_df$obs)*5,
+                color=edge.col)+
+   geom_point(data = rlocs, aes(x=x,y=y), size=3)+
+   geom_point(data = rlocs, aes(x=x,y=y), color=rdr.col, size=2.5)+
+   geom_segment(aes(x=570600, xend=571600, y=4902000, yend=4902000), 
+                size=2.5)+
+   annotate("text", x=570600, y=4901800, 
+            label="1 Km", hjust=0)+
+   scale_fill_manual(values=c(nonforest.col, forest.col2), labels=c("non-forest", "forest"))+
+   xlim(c(567000,572000))+
+   ylim(c(4894000,4904000))+
+   theme(panel.background = element_blank(),
+         legend.key = element_rect(fill = "black"),
+         legend.title = element_blank(),
+         axis.title = element_text(size = 14),
+         plot.title = element_text(face = "bold", size = 18))+
+   xlab("\nx")+
+   ylab("y\n")+
+   ggtitle("d)")
+   
+ 
+
+```
+
+
+```{r}
+
+  beta <- as.data.frame(rstan::extract(fit, pars="beta"))
+
+  eff.df <- data.frame(effect=c("Origin feeder\nin forest",
+                      "Destination feeder\nin forest",
+                      "Distance between\nfeeders (Km)",
+                      "Proportion of\nintervening forest"),
+             estim=apply(beta[,-1],2,mean),
+             low=apply(beta[,-1],2,quantile, probs=0.025),
+             high=apply(beta[,-1],2,quantile,probs=0.975),
+             medlow=apply(beta[,-1],2,quantile,probs=0.1),
+             medhigh=apply(beta[,-1],2,quantile,probs=0.9))
+  eff.df$f.effect <- factor(eff.df$effect, levels = eff.df$effect[4:1])
+  
+  eff.plot <- ggplot(data = eff.df, aes(x=estim, y=f.effect))+
+    geom_vline(xintercept = 0, linetype="dashed")+
+    geom_errorbarh(aes(xmin=low, xmax=high), height=0, col=edge.col,alpha=0.9)+
+    geom_errorbarh(aes(xmin=medlow, xmax=medhigh), height=0, size=2, col=edge.col)+
+    geom_point(size=3)+
+    geom_point(size=2.5, color=rdr.col)+
+    theme(panel.background = element_blank(),
+          axis.line = element_line(colour = "darkgrey"),
+          axis.text = element_text(color = "black", size=9),
+          axis.title.x = element_text(size = 12),
+          plot.title = element_text(face = "bold", size=18))+
+    ylab("")+
+    xlab(expression(hat(beta)))+
+    ggtitle("a)")
+
+
+```
+
+```{r}
+
+  beta.hat <- apply(beta, 2, mean)
+  names(beta.hat) <- colnames(mod.data[["X"]])
+
+  prob_conn_df <- data.frame("dist_km" = seq(0,2,length.out = 1000))
+  prob_conn_df$forest_0 <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km), lower.tail = F)
+  prob_conn_df$forest_50 <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km
+                                         + beta.hat[5]*0.5), lower.tail = F)
+  prob_conn_df$forest_100 <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km
+                                         + beta.hat[5]), lower.tail = F)
+  prob_conn_df$forest_origin <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km
+                                         + beta.hat[2]), lower.tail = F)
+  prob_conn_df$forest_dest <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km
+                                         + beta.hat[3]), lower.tail = F)
+  prob_conn_df$both <- ppois(0, exp(beta.hat[1] + beta.hat[4]*prob_conn_df$dist_km
+                                         + beta.hat[2] + beta.hat[3]), lower.tail = F)
+  
+  
+  lineplot_theme <- theme(panel.background = element_blank(),
+          axis.line = element_line(colour = "darkgrey"),
+          axis.text = element_text(colour = "black"),
+          plot.title = element_text(face = "bold", size=18))
+  
+int_for_plot <-   ggplot(data = prob_conn_df)+
+    geom_line(aes(x=dist_km, y=forest_0), size=1.2, 
+              color=forest.col2, alpha=0.5)+
+    geom_line(aes(x=dist_km, y=forest_50), size=1.2,
+              color=forest.col2, alpha=0.75)+
+    geom_line(aes(x=dist_km, y=forest_100), size=1.2,
+              color=forest.col2)+
+    lineplot_theme+
+    annotate("text", x=-0.3, y=prob_conn_df$forest_0[1]+0.02, 
+             label="0% Intervening forest", hjust=0, size=3)+
+    annotate("text", x=-0.3, y=prob_conn_df$forest_50[1], 
+             label="50%", hjust=0, size=3) +
+    annotate("text", x=-0.3, y=prob_conn_df$forest_100[1], 
+             label="100%", hjust=0, size=3)+
+    ylim(c(0,0.6))+
+    xlim(c(-0.3,2))+
+    xlab("\n Distance between feeders (Km)")+
+    ylab("Probability of at least\none movement per week\n")+
+    ggtitle("b)")
+
+
+  detect_plot <- ggplot(data = prob_conn_df)+
+    geom_line(aes(x=dist_km, y=forest_0), color=forest.col1, size=1.2)+
+    geom_line(aes(x=dist_km, y=both), color=forest.col2, size=1.2)+
+    lineplot_theme+
+    ylim(c(0,0.6))+
+    xlab("\n Distance between feeders (Km)")+
+    ylab("Probability of at least\none movement per week\n")+
+    ggtitle("c)")+
+    annotate("segment", x = 1.2, xend=1.3, y=0.5, yend=0.5,
+             color=forest.col1, size=1.2)+
+    annotate("text", x=1.32, y=0.5, label="Both feeders\nin open habitat",
+             hjust=0, size=3)+
+    annotate("segment", x = 1.2, xend=1.3, y=0.4, yend=0.4,
+             color=forest.col2, size=1.2)+
+    annotate("text", x=1.32, y=0.4, label="Both feeders\nin forest",
+             hjust=0, size=3)
+
+```
+
+
+
+
+
+```{r}
+
+
+ lomat <- rbind(c(1,2,2),
+                c(1,2,2),
+                c(3,2,2),
+                c(3,2,2),
+                c(4,2,2),
+                c(4,2,2))
+
+
+png(filename = "~/Documents/Columbine/Analysis/Bird_movements/Bilinear_dyad_models/figure_2_effects_network.png",
+    width = 3600, height = 3000, units = "px", res = 300)
+  grid.arrange(eff.plot, graph_plot, int_for_plot, detect_plot, layout_matrix=lomat)
+dev.off()
+
+
+```
+
+Some extra calculations for the paper:
+
+```{r}
+  beta.mat <- as.matrix(beta)
+
+# effect of intervening forest
+  exp(mean(beta.mat[,5]))
+  exp(quantile(beta.mat[,5],probs=c(0.025,0.975)))
+  
+# effect of local habitat
+  exp(mean(beta.mat[,2]+beta.mat[,3]))
+  exp(quantile((beta.mat[,2]+beta.mat[,3]),probs=c(0.025,0.975)))
+
+# Prob >1 movement between two readers given
+# 1) Both in open
+  w_open <- c(1,0,0,0.1,0)
+  loglam_open <- as.double(beta.mat%*%w_open)
+  ppois(0, lambda = c(exp(mean(loglam_open)),
+                      exp(quantile(loglam_open, 0.025)),
+                      exp(quantile(loglam_open, 0.975))),
+        lower.tail = F)
+  
+# 2) Both in forest
+  w_forest <- c(1,1,1,0.1,0)
+  loglam_forest <- as.double(beta.mat%*%w_forest)
+  ppois(0, lambda = c(exp(mean(loglam_forest)),
+                      exp(quantile(loglam_forest, 0.025)),
+                      exp(quantile(loglam_forest, 0.975))),
+        lower.tail = F)
+
+```
+
+
+
+
+
