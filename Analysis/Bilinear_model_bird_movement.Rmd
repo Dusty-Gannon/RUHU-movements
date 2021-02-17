@@ -69,9 +69,9 @@ knitr::opts_chunk$set(echo = TRUE)
 Let $y_{i,j,k} \in \mathbb{N}^+$ be the number of movements detected between readers $i$ and $j$ by hummingbirds in year $k$, where $i \ne j = 1,2,...,R$. Following @hoff2005b, we model the number of movements in a bilinear model:
 
 $$
- \log (\lambda_{i,j,k}) =  {\bf x}_{ij}\boldsymbol \beta + u_i + w_j + \gamma_{ij} + \eta_k + \log(d_k)
+ \log (\lambda_{i,j,k}) =  {\bf x}_{ij}\boldsymbol \beta + u_i + w_j + \gamma_{ij} + \eta_k +\log(b_k) + \log(d_k)
 $$
-where ${\boldsymbol \beta}$ is a vector of dyad specific effects with ${\bf x}_{i,j}$ the vector of dyad-specific regressors for dyad $\{i,j\}$, ${\bm \beta}_s$. The effects $u_i$ and $w_i$ are the average effects of reader $i$ as a sender and receiver (respectively), and $v_{i,b}$ and term $\gamma_{i,j}$ is an average effect on movement for the pair of readers $\{i,j\}$. Finally, $\eta_k$ is the effect of a given year, accounting for good years and bad years for hummingbirds, and $d_k$ is an offset for the number of days the readers were maintained in year $k$.
+where ${\boldsymbol \beta}$ is a vector of dyad specific effects with ${\bf x}_{i,j}$ the vector of dyad-specific regressors for dyad $\{i,j\}$. The effects $u_i$ and $w_i$ are the average effects of reader $i$ as a sender and receiver (respectively), and the term $\gamma_{i,j}$ is an average effect on movement for the pair of readers $\{i,j\}$. Finally, $b_k$ and $d_k$ are offsets for the cumulative number of birds that had been implanted with RFID tags in year $k$ and the number of days the readers were maintained in year $k$ (respectively).
 
 To induce dependence among observations that involve reader $i$, we assume
 
@@ -115,16 +115,15 @@ data{
   int<lower=0> R;             //number of nodes (readers)
   int<lower=0> D;             //number of dyads
   int<lower=0> P;             //number of fixed effects
-  int<lower=0> S;             //number of years
   
   int<lower=0,upper=R> r1[N];     //reader 1 index
   int<lower=0,upper=R> r2[N];     //reader 2 index
   int<lower=0,upper=D> dyad[N];   //index for the dyad
   int<lower=0> order[N];          //order for the dyad
-  int<lower=0> yr[N];             //index for the year
   
   matrix[N,P] X;                  //fixed effects model matrix
-  real<lower=0> offset[N];        //number of days connections were active
+  real<lower=0> os_d[N];          //number of days connections were active
+  real<lower=0> os_b[N];          //cumulative number of birds with RFID tags
   int<lower=0> y[N];              //number of movements
 
 }
@@ -132,18 +131,16 @@ data{
 parameters{
 
   vector[P] beta;                //regression parameters
-  vector[2] u_raw[R];                //random effects for sender/receiver
-  vector[2] gamma_raw[D];            //random effects for the dyad
-  real eta[S];                     // random effects for the year
-  
+  vector[2] u_raw[R];            //random effects for sender/receiver
+  vector[2] gamma_raw[D];        //random effects for the dyad
+
   vector<lower=0>[2] sigma_u;            //scale for sender/receiver effects
   cholesky_factor_corr[2] L_omega_u;
   
   real<lower=0> sigma_gamma;        //scale for dyad effects
   cholesky_factor_corr[2] L_omega_gamma;
   
-  real<lower=0> sigma_eta;           //scale for year variation
-     
+
 }
 
 transformed parameters{
@@ -164,8 +161,8 @@ transformed parameters{
   //create linear predictor
   for(i in 1:N){
     lambda[i] = exp(X[i,]*beta + u[r1[i],1] + u[r2[i],2] +
-                    gamma[dyad[i],order[i]] + eta[yr[i]]*sigma_eta 
-                    + log(offset[i]));
+                    gamma[dyad[i],order[i]] 
+                    + log(os_d[i]) + log(os_b[i]));
   }
   
 }
@@ -176,7 +173,6 @@ model{
   beta ~ normal(0,1);
   sigma_u ~ normal(0,2);
   sigma_gamma ~ normal(0,2);
-  sigma_eta ~ normal(0,2);
   L_omega_u ~ lkj_corr_cholesky(5);
   L_omega_gamma ~ lkj_corr_cholesky(5);
   
@@ -190,7 +186,6 @@ model{
     gamma_raw[d] ~ std_normal(); 
   }
   
-  eta ~ std_normal();
   
   for(i in 1:N){
     y[i] ~ poisson(lambda[i]);
@@ -219,131 +214,27 @@ generated quantities{
 
 ```
 
-### Allowing for auto-regressive random effects for years
-
-```{stan output.var="soc_net_poisson_ar", eval=FALSE}
-
-data{
-
-  int<lower=0> N;             //number of observations (edges)
-  int<lower=0> R;             //number of nodes (readers)
-  int<lower=0> D;             //number of dyads
-  int<lower=0> P;             //number of fixed effects
-  int<lower=0> S;             //number of years
-  
-  int<lower=0,upper=R> r1[N];     //reader 1 index
-  int<lower=0,upper=R> r2[N];     //reader 2 index
-  int<lower=0,upper=D> dyad[N];   //index for the dyad
-  int<lower=0> order[N];
-  int<lower=0> yr[N];             //index for the year
-  
-  matrix[N,P] X;                  //fixed effects model matrix
-  real<lower=0> offset[N];        //number of days connections were active
-  int<lower=0> y[N];              //number of movements
-
-}
-
-transformed data{
-
-  matrix[S,S] I_S;
-  
-  I_S = diag_matrix(rep_vector(1,S));
-
-}
-
-parameters{
-
-  vector[P] beta;                //regression parameters
-  vector[2] u[R];                //random effects for sender/receiver
-  vector[2] gamma[D];            //random effects for the dyad
-  vector[S] w;                     // random effects for the year
-  
-  vector<lower=0>[2] sigma_u;            //scale for sender/receiver effects
-  corr_matrix[2] omega_u;
-  
-  real<lower=0> sigma_gamma;        //scale for dyad effects
-  corr_matrix[2] omega_gamma;
-  
-  real<lower=0> sigma_w;           //scale for year variation
-  real<lower=0,upper=1> rho;       //temporal autocorrelation
-    
-}
-
-transformed parameters{
-
-  real<lower=0> lambda[N];
-  matrix[S,S] Sigma_w_lt;
-  
-  Sigma_w_lt = I_S;
-  for(i in 1:S){
-    for(j in 1:i){
-      Sigma_w_lt[i,j] = Sigma_w_lt[i,j]*(rho^(i-j));
-    }
-  }
-  
-  //create linear predictor
-  for(i in 1:N){
-    lambda[i] = exp(X[i,]*beta + u[r1[i],1] + u[r2[i],2] +
-                    gamma[dyad[i],order[i]] + w[yr[i]] 
-                    + log(offset[i]));
-  }
-  
-}
-
-model{
-
-  //priors
-  beta ~ normal(0,1);
-  sigma_u ~ normal(0,1);
-  sigma_gamma ~ normal(0,1);
-  sigma_w ~ normal(0,2);
-  omega_u ~ lkj_corr(5);
-  omega_gamma ~ lkj_corr(5);
-  
-  
-  //model
-  for(r in 1:R){
-    u[r] ~ multi_normal(rep_vector(0,2), quad_form_diag(omega_u, sigma_u));
-  }
-
-  for(d in 1:D){
-    gamma[d] ~ multi_normal(rep_vector(0,2), quad_form_diag(omega_gamma, rep_vector(sigma_gamma,2))); 
-  }
-  
-  w ~ multi_normal(rep_vector(0,S),
-  ((sigma_w^2)*(Sigma_w_lt*Sigma_w_lt' - (Sigma_w_lt -I_S)*(Sigma_w_lt -I_S)')));
-  
-  for(i in 1:N){
-    y[i] ~ poisson(lambda[i]);
-  }
-
-
-}
-
-generated quantities{
-
-  vector[N] log_lik;
-  vector[N] y_hat;
-  
-  for(i in 1:N){
-    log_lik[i] = poisson_lpmf(y[i] | lambda[i]);
-    y_hat[i] = poisson_rng(lambda[i]);
-  }
-
-}
-
-```
-
-
 
 ```{r}
 
+# number of movements for each year
   mvmnts <- read.table(file = here("Data","total_movements_by_year.tsv"), 
                        header = T, as.is = T, sep = "\t")
   
+# reader locations
   rlocs <- read.table(file = here("Data", "hja_reader_locations_centercomb.txt"),
                       header = T, sep = "\t")
   rdrs <- rlocs$reader
+  
+# bird capture data
+  caps <- read_csv(file = here("Data", "hja_hummingbird_captures_rfid.csv"))
+  birds_yr <- group_by(caps, yr) %>%
+    summarise(n=n())
+  
+  birds_yr$cum_birds <- cumsum(birds_yr$n)
+  
+# merge back with movement data
+  mvmnts <- merge(mvmnts, birds_yr, by.x="year", by.y="yr")
 
 # create a column for the order
   #if the position for reader 1 > reader 2, order=1
@@ -375,7 +266,7 @@ generated quantities{
 
   N <- nrow(mvmnts)
   y <- mvmnts$count
-  X <- model.matrix(~ forest_i + forest_j + dist_ij + pfor_ij, data = mvmnts)
+  X <- model.matrix(~ dist_ij + pfor_ij + forest_ij, data = mvmnts)
   
   P <- dim(X)[2]
   ord <- mvmnts$order
@@ -385,19 +276,19 @@ generated quantities{
   r1 <- as.integer(factor(mvmnts$reader_i, levels = rdrs))
   r2 <- as.integer(factor(mvmnts$reader_j, levels = rdrs))
   R <- length(unique(r1))
-  os <- (mvmnts$active_days)/7
+  os_d <- (mvmnts$active_days)/7
+  os_b <- mvmnts$cum_birds/10
   
-   year <- as.integer(factor(mvmnts$year))
-   S <- length(unique(year))
-  
+# compile data into list
   mod.data <- list(N=N, P=P, R=R, D=D, r1=r1,
-                   S=S, yr=year,
                    r2=r2, dyad=dyad, order=ord,
-                   X=X, offset=os, y=y)
+                   X=X, os_d=os_d, os_b=os_b,
+                   y=y)
   
-  fit <- sampling(soc_net_poisson, data=mod.data, chains=2, control=list(adapt_delta=0.9), init=0)
-  # fit_ar <- sampling(soc_net_poisson_ar, data=mod.data, chains=2, control=list(adapt_delta=0.9, max_treedepth=12),
-  #                    init=0)
+# fit the model
+  fit <- sampling(soc_net_poisson, data=mod.data, chains=2, 
+                  control=list(adapt_delta=0.9), init=0)
+
   
   
 
@@ -409,11 +300,6 @@ generated quantities{
  reff1 <- relative_eff(exp(loglik1))
  fit_loo1 <- loo(loglik1, r_eff = reff1)
  
-# AR
- loglik2 <- extract_log_lik(fit_ar, merge_chains = F)
- reff2 <- relative_eff(exp(loglik2))
- fit_loo2 <- loo(loglik2, r_eff = reff2)
-
 ```
 
 ```{r save fit, echo=FALSE, eval=FALSE}

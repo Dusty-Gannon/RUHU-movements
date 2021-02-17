@@ -1,0 +1,198 @@
+---
+title: "Posterior effects plots"
+author: "D. G. Gannon"
+date: "Feb 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Packages
+
+  require(tidyverse)
+  require(here)
+  require(rstan)
+  require(ggridges)
+  require(gridExtra)
+
+```
+
+### Load model fit object
+
+```{r}
+ 
+  load(file = here(
+    "Data",
+    "fit_sender_receiver.RData"
+  ))
+
+```
+
+### Figure 2: Ridges plot
+
+```{r}
+
+  beta <- as.matrix(
+    as.data.frame(rstan::extract(fit, pars="beta"))
+  )
+
+  expl_vars <- c("Intercept",
+                      "Distance between\nfeeders (Km)",
+                      "Proportion of\nintervening forest",
+                      "Local forest cover")
+  
+
+  plot_df <- tibble(
+    draws = as.vector(beta),
+    eff = rep(expl_vars, each=nrow(beta)),
+  )
+  
+  plot_df <- plot_df %>%
+    mutate(
+      eff.f = fct_rev(factor(eff, levels = expl_vars))
+    )
+  
+  eff.plot <- ggplot(data = plot_df, aes(x=draws, y=eff.f)) + 
+    geom_density_ridges(scale=1.5, fill="#C8553D",
+                        rel_min_height=0.005) + 
+    geom_vline(xintercept = 0, linetype="dashed")+
+    theme(
+      panel.background = element_blank(),
+      panel.grid.major.y = element_line(colour = "grey"),
+      axis.text = element_text(size = 16, colour = "black"),
+      panel.grid.major.x = element_blank(),
+      axis.ticks.length.x = unit(2, units = "mm"),
+      axis.line = element_line(colour = "darkgrey"),
+      axis.title = element_text(size=20)
+    ) +
+    xlab("") + 
+    ylab("Density\n")
+  
+  png(filename = here(
+    "Figures",
+    "ridges_plot.png"
+  ), width = 1800, height = 1200, units = "px", res = 300)
+    eff.plot
+  dev.off()
+      
+
+
+```
+
+### Figure 3: average movement predictions
+
+```{r}
+
+  # line color
+  forest_col <- "#4A7C59"
+
+  beta.hat <- apply(beta, 2, mean)
+  names(beta.hat) <- colnames(mod.data[["X"]])
+  
+# create vector of new distances
+  dist_new <- seq(0,2,length.out = 1000)
+
+# create new dataframe
+  prob_conn_df <- tibble(
+    forest_0 = ppois(
+      0, exp(beta.hat[1] + beta.hat[2]*dist_new), lower.tail = F
+    ),
+    forest_100 = ppois(
+      0, exp(beta.hat[1] + beta.hat[2]*dist_new + beta.hat[3]),
+      lower.tail = F
+    ),
+    cover_0 = forest_0,
+    cover_1 = ppois(
+      0, exp(beta.hat[1] + beta.hat[2]*dist_new + beta.hat[4]),
+      lower.tail = F
+    ),
+    both = ppois(
+      0, exp(beta.hat[1] + beta.hat[2]*dist_new + beta.hat[3] + beta.hat[4]),
+      lower.tail = F
+    )
+  )
+  
+  prob_conn_df$dist <- dist_new
+  
+  
+  lineplot_theme <- theme(panel.background = element_blank(),
+          axis.line = element_line(colour = "darkgrey"),
+          axis.text = element_text(colour = "black"),
+          plot.title = element_text(size=16))
+  
+ int_for_plot <- ggplot(data = prob_conn_df)+
+    geom_line(aes(x=dist, y=forest_0), size=1.2, 
+              color=forest_col, alpha=0.5)+
+    geom_line(aes(x=dist, y=forest_100), size=1.2,
+              color=forest_col)+
+    lineplot_theme +
+    xlab("\n Distance between feeders (Km)")+
+    ylab("Probability of at least\none movement per bird per week\n") +
+    ggtitle("a) Intervening forest")
+
+
+  detect_plot <- ggplot(data = prob_conn_df)+
+    geom_line(aes(x=dist, y=cover_0), color=forest_col, 
+              size=1.2, alpha=0.5)+
+    geom_line(aes(x=dist, y=cover_1), color=forest_col, 
+              size=1.2)+
+    lineplot_theme+
+    xlab("\n Distance between feeders (Km)")+
+    ylab("Probability of at least\none movement per bird per week\n") +
+    ggtitle("b) Local forest cover")
+  
+  
+  both_plot <- ggplot(data = prob_conn_df)+
+    geom_line(aes(x=dist, y=cover_0), color=forest_col, 
+              size=1.2, alpha=0.5)+
+    geom_line(aes(x=dist, y=both), color=forest_col, 
+              size=1.2)+
+    lineplot_theme+
+    xlab("\n Distance between feeders (Km)")+
+    ylab("Probability of at least\none movement per bird per week\n") +
+    ggtitle("c) Compounding effects")
+  
+  
+  png(filename = here(
+    "Figures", "lines_plot.png"
+  ), height = 2700, width = 1200, units = "px", res = 300)
+    grid.arrange(int_for_plot, detect_plot,
+                 both_plot, ncol=1)
+  dev.off()
+
+```
+
+#### Some extra calculations for reporting:
+
+```{r}
+  beta.mat <- as.matrix(beta)
+
+# effect of intervening forest
+  exp(mean(beta.mat[,5]))
+  exp(quantile(beta.mat[,5],probs=c(0.025,0.975)))
+  
+# effect of local habitat
+  exp(mean(beta.mat[,2]+beta.mat[,3]))
+  exp(quantile((beta.mat[,2]+beta.mat[,3]),probs=c(0.025,0.975)))
+
+# Prob >1 movement between two readers given
+# 1) Both in open
+  w_open <- c(1,0,0,0.1,0)
+  loglam_open <- as.double(beta.mat%*%w_open)
+  ppois(0, lambda = c(exp(mean(loglam_open)),
+                      exp(quantile(loglam_open, 0.025)),
+                      exp(quantile(loglam_open, 0.975))),
+        lower.tail = F)
+  
+# 2) Both in forest
+  w_forest <- c(1,1,1,0.1,0)
+  loglam_forest <- as.double(beta.mat%*%w_forest)
+  ppois(0, lambda = c(exp(mean(loglam_forest)),
+                      exp(quantile(loglam_forest, 0.025)),
+                      exp(quantile(loglam_forest, 0.975))),
+        lower.tail = F)
+
+```
+
