@@ -277,7 +277,7 @@ generated quantities{
   r2 <- as.integer(factor(mvmnts$reader_j, levels = rdrs))
   R <- length(unique(r1))
   os_d <- (mvmnts$active_days)/7
-  os_b <- mvmnts$cum_birds/10
+  os_b <- mvmnts$cum_birds
   
 # compile data into list
   mod.data <- list(N=N, P=P, R=R, D=D, r1=r1,
