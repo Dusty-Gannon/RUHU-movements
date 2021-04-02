@@ -1,7 +1,7 @@
 ---
 title: "Posterior effects plots"
 author: "D. G. Gannon"
-date: "Feb 2021"
+date: "March 2021"
 output:
   github_document:
     pandoc_args: --webtex
@@ -30,10 +30,10 @@ output:
 
 ```
 
-### Figure 2: Ridges plot
+### Ridges plot
 
 ```{r}
-
+# get posterior draws for regression parameters
   beta <- as.matrix(
     as.data.frame(rstan::extract(fit, pars="beta"))
   )
@@ -43,17 +43,19 @@ output:
                       "Proportion of\nintervening forest",
                       "Local forest cover")
   
-
+# combine into dataframe for plotting
   plot_df <- tibble(
     draws = as.vector(beta),
     eff = rep(expl_vars, each=nrow(beta)),
   )
-  
+ 
+# reverse factor levels 
   plot_df <- plot_df %>%
     mutate(
       eff.f = fct_rev(factor(eff, levels = expl_vars))
     )
   
+# plot
   eff.plot <- ggplot(data = plot_df, aes(x=draws, y=eff.f)) + 
     geom_density_ridges(scale=1.5, fill="#C8553D",
                         rel_min_height=0.005) + 
@@ -70,6 +72,7 @@ output:
     xlab("") + 
     ylab("Density\n")
   
+# save as png
   png(filename = here(
     "Figures",
     "ridges_plot.png"
@@ -81,13 +84,14 @@ output:
 
 ```
 
-### Figure 3: average movement predictions
+### Probability of movement predictions
 
 ```{r}
 
   # line color
   forest_col <- "#4A7C59"
 
+# Bayesian estimates
   beta.hat <- apply(beta, 2, mean)
   names(beta.hat) <- colnames(mod.data[["X"]])
   
@@ -114,22 +118,23 @@ output:
     )
   )
   
+# add distance column
   prob_conn_df$dist <- dist_new
   
-  
+# plot theme  
   lineplot_theme <- theme(panel.background = element_blank(),
           axis.line = element_line(colour = "darkgrey"),
           axis.text = element_text(colour = "black"),
+          axis.title = element_blank(),
           plot.title = element_text(size=16))
   
+# plots
  int_for_plot <- ggplot(data = prob_conn_df)+
     geom_line(aes(x=dist, y=forest_0), size=1.2, 
               color=forest_col, alpha=0.5)+
     geom_line(aes(x=dist, y=forest_100), size=1.2,
               color=forest_col)+
     lineplot_theme +
-    xlab("\n Distance between feeders (Km)")+
-    ylab("Probability of at least\none movement per bird per week\n") +
     ggtitle("a) Intervening forest")
 
 
@@ -139,8 +144,6 @@ output:
     geom_line(aes(x=dist, y=cover_1), color=forest_col, 
               size=1.2)+
     lineplot_theme+
-    xlab("\n Distance between feeders (Km)")+
-    ylab("Probability of at least\none movement per bird per week\n") +
     ggtitle("b) Local forest cover")
   
   
@@ -150,8 +153,6 @@ output:
     geom_line(aes(x=dist, y=both), color=forest_col, 
               size=1.2)+
     lineplot_theme+
-    xlab("\n Distance between feeders (Km)")+
-    ylab("Probability of at least\none movement per bird per week\n") +
     ggtitle("c) Compounding effects")
   
   
@@ -167,15 +168,15 @@ output:
 #### Some extra calculations for reporting:
 
 ```{r}
-  beta.mat <- as.matrix(beta)
 
-# effect of intervening forest
-  exp(mean(beta.mat[,5]))
-  exp(quantile(beta.mat[,5],probs=c(0.025,0.975)))
+# effects
+  print(fit, pars="beta")
   
-# effect of local habitat
-  exp(mean(beta.mat[,2]+beta.mat[,3]))
-  exp(quantile((beta.mat[,2]+beta.mat[,3]),probs=c(0.025,0.975)))
+# Prob beta < 0
+  beta <- as.matrix(
+    as.data.frame(rstan::extract(fit, pars="beta"))
+  )
+  apply(beta, 2, function(x){mean(x < 0)})
 
 # Prob >1 movement between two readers given
 # 1) Both in open
