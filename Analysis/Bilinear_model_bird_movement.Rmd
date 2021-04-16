@@ -76,12 +76,12 @@ where ${\boldsymbol \beta}$ is a vector of dyad specific effects with ${\bf x}_{
 To induce dependence among observations that involve reader $i$, we assume
 
 $$
-\begin{split}
+\begin{aligned}
 \begin{bmatrix}
 u_i \\
 w_i
-\end{bmatrix} \sim \mathcal{N}\left({\bf 0},\ {\boldsymbol \Sigma}_{uw} \right),\\
-{\boldsymbol \Sigma}_{uw} = \begin{bmatrix}
+\end{bmatrix} &\sim \mathcal{N}\left({\bf 0},\ {\boldsymbol \Sigma}_{uw} \right),\\
+{\boldsymbol \Sigma}_{uw} &= \begin{bmatrix}
 \sigma_{u}^2 & \sigma_{uw}\\
 \sigma_{uw} & \sigma_w^2
 \end{bmatrix},
@@ -91,21 +91,21 @@ $$
 such that observations that have a common sender or receiver may be correlated. Importantly, this allows for the potential that good senders may be poor receivers, so negative correlation is a possibility. Finally, let
 
 $$
-\begin{split}
+\begin{aligned}
 \begin{bmatrix}
 \gamma_{i,j}\\
 \gamma_{j,i}
-\end{bmatrix} \sim \mathcal{N}({\bf 0},\ {\boldsymbol \Sigma}_\gamma),\\
-{\boldsymbol \Sigma}_\gamma = \begin{bmatrix}
+\end{bmatrix} &\sim \mathcal{N}({\bf 0},\ {\boldsymbol \Sigma}_\gamma),\\
+{\boldsymbol \Sigma}_\gamma &= \begin{bmatrix}
 \sigma_\gamma^2 & \rho\sigma_\gamma^2\\
 \rho\sigma_\gamma^2 & \sigma_\gamma^2
 \end{bmatrix},
-\end{split}
+\end{aligned}
 $$
 
 where $\rho$ is the correlation between the rate of movement from $i\to j$ and $j \to i$. These differ from standard random effects models because they allow for negative correlation of the observations within a dyad.
 
-
+## Stan Model Code
 
 ```{stan output.var="soc_net_poisson", eval=FALSE}
 
@@ -214,6 +214,7 @@ generated quantities{
 
 ```
 
+### Load data
 
 ```{r}
 
@@ -261,8 +262,8 @@ generated quantities{
  
 ```
 
-
-```{r model fit}
+# Compile data
+```{r compile data}
 
   N <- nrow(mvmnts)
   y <- mvmnts$count
@@ -284,7 +285,10 @@ generated quantities{
                    r2=r2, dyad=dyad, order=ord,
                    X=X, os_d=os_d, os_b=os_b,
                    y=y)
-  
+```
+
+# Fitting the model
+```{r eval=FALSE}
 # fit the model
   fit <- sampling(soc_net_poisson, data=mod.data, chains=2, 
                   control=list(adapt_delta=0.9), init=0)
@@ -293,6 +297,16 @@ generated quantities{
   
 
 ```
+
+```{r done, echo=FALSE}
+knitr::knit_exit()
+```
+
+
+```{r load fit, echo=FALSE}
+load( here("Data", "fit_sender_receiver.RData"))
+```
+
 
 ```{r}
 
@@ -306,157 +320,6 @@ generated quantities{
 
  save(fit, fit_loo1, mod.data,
       file = here("Data", "fit_sender_receiver.RData"))
-
-```
-
-```{r load fit, echo=FALSE}
-load( here("Data", "fit_sender_receiver.RData"))
-```
-
-
-```{r}
-
-# colors for plot
- forest.col <- rgb(229,229,220, maxColorValue = 255)
- nonforest.col <- rgb(255,255,255, maxColorValue = 255)
- rdr.col <- rgb(252,163,17, maxColorValue = 255)
- edge.col <- rgb(20,33,61, maxColorValue = 255)
- # cuts <- c(-1,0.5,1.5)
- # pal <- colorRampPalette(c(nonforest.col, forest.col))
- 
-# load forest raster
- #forest <- raster("~/Documents/Columbine/Data/GIS_Data/forest.tif")
-
- y.hat <- as.data.frame(rstan::extract(fit, pars="y_hat"))
-
- E_y.hat <- apply(y.hat, 2, mean)
- 
-# create aggregated counts
- mv_counts <- data.frame(edge=paste(mvmnts$reader_i, mvmnts$reader_j, sep = "-"),
-                         obs_count=mvmnts$count,
-                         pred_count=E_y.hat)
- 
- mvs_all <- group_by(mv_counts, edge) %>% summarise(., obs=sum(obs_count), pred=sum(pred_count))
- 
-# Create observed and predicted adjacency matrices
- Amat_pred <- fill_Amat(mvs_all$pred, dim=R)
- Amat_obs <- fill_Amat(mvs_all$obs, dim=R)
- 
- rownames(Amat_pred) <- rlocs$reader
- colnames(Amat_pred) <- rlocs$reader
- rownames(Amat_obs) <- rlocs$reader
- colnames(Amat_obs) <- rlocs$reader
- 
- g_pred <- graph_from_adjacency_matrix(Amat_pred, mode = "directed", weighted = T, diag = F)
- g_pred <- set_vertex_attr(g_pred, "x", value = rlocs$x)
- g_pred <- set_vertex_attr(g_pred, "y", value=rlocs$y)
- E(g_pred)$width <- log(E(g_pred)$weight + 1)
- E(g_pred)$arrow.size <- 0.1
- E(g_pred)$color <- edge.col
- V(g_pred)$size <- 5
- V(g_pred)$label <- NA
- V(g_pred)$color <- rdr.col
- 
- 
- g_obs <- graph_from_adjacency_matrix(Amat_obs, mode = "directed", weighted = T, diag = F)
- V(g_obs)$x <- rlocs$x
- V(g_obs)$y <- rlocs$y
- E(g_obs)$width <- log(E(g_obs)$weight + 1)
- E(g_obs)$arrow.size <- 0.2
- E(g_obs)$color <- edge.col
- V(g_obs)$label <- NA
- V(g_obs)$size <- 5
- V(g_obs)$color <- rdr.col
- 
-png(filename = here("Figures", "post_pred_fig.png"),
-    height = 1800, width = 3600, res = 300)
- par(mfrow=c(1,2), mar=c(1,2,2,1))
- plot(g_obs, frame=T)
- title(main = "Observed movements", cex.main=1, adj=0)
- plot(g_pred, frame=T)
- title(main = "Posterior predictive movement rates",
-       cex.main=1, adj=0)
- dev.off()
-  
-```
-
-\subsection{Computing observed and predicted network metrics}
-
-```{r node strength}
-
- pred.col <- rgb(229,229,220, maxColorValue = 255)
- obs.col <- rgb(252,163,17, maxColorValue = 255)
- interval.col <- rgb(20,33,61, maxColorValue = 255)
-
-# incoming strength
-
-  obs_instr <- apply(Amat_obs, 2, sum, na.rm=T)
-
-  pp_instr <- matrix(nrow = nrow(y.hat), ncol = R)
-  colnames(pp_instr) <- colnames(Amat_obs)
-  for(i in 1:nrow(pp_instr)){
-    yhat_i <- as.double(y.hat[i, ])
-    Amat_i <- fill_Amat(yhat_i, dim = R)
-    pp_instr[i,] <- apply(Amat_i, 2, sum, na.rm=T)
-  }
-
-  instr_df <- data.frame(reader=colnames(Amat_obs),
-                         obs_instr = obs_instr/(rlocs$days_active/7),
-                         mean_pred = apply(pp_instr,2,mean)/(rlocs$days_active/7),
-                         low_pred=apply(pp_instr,2,quantile, probs=0.025)/(rlocs$days_active/7),
-                         high_pred=apply(pp_instr,2,quantile, probs=0.975)/(rlocs$days_active/7))
-  instr_df$reader <- factor(instr_df$reader, 
-                            levels = colnames(Amat_obs)[order(instr_df$mean_pred)])
-  
-  graph_mets_theme <- theme(panel.background = element_blank(),
-                            axis.line = element_line(colour = "black"),
-                            axis.text.x = element_text(colour = "white"))
-  
-  
-  instr_plot <- ggplot(data = instr_df)+
-    geom_errorbar(aes(x=reader, ymin=low_pred, ymax=high_pred),
-                  width=0.2, size=1.5, color=alpha(interval.col, alpha = 0.95))+
-    geom_point(aes(x=reader, y=mean_pred), size=4, color="white")+
-    geom_point(aes(x=reader, y=mean_pred), size=3.5, color="black")+
-    geom_point(aes(x=reader,y=obs_instr), size=2, color=obs.col,
-               shape=18)+
-    graph_mets_theme+
-    xlab("")+
-    ylab("Incoming movements per week")
-  
-  
-# Outgoing strength
-  obs_outstr <- apply(Amat_obs, 1, sum, na.rm=T)
-
-  pp_outstr <- matrix(nrow = nrow(y.hat), ncol = R)
-  colnames(pp_outstr) <- rownames(Amat_obs)
-  for(i in 1:nrow(pp_outstr)){
-    yhat_i <- as.double(y.hat[i, ])
-    Amat_i <- fill_Amat(yhat_i, dim = R)
-    pp_outstr[i,] <- apply(Amat_i, 1, sum, na.rm=T)
-  }
-
-  outstr_df <- data.frame(reader=colnames(Amat_obs),
-                         obs_outstr = obs_outstr/(rlocs$days_active/7),
-                         mean_pred = apply(pp_outstr,2,mean)/(rlocs$days_active/7),
-                         low_pred=apply(pp_outstr,2,quantile, probs=0.025)/(rlocs$days_active/7),
-                         high_pred=apply(pp_outstr,2,quantile, probs=0.975)/(rlocs$days_active/7))
-  outstr_df$reader <- factor(outstr_df$reader, 
-                            levels = colnames(Amat_obs)[order(outstr_df$mean_pred)])
-  
-  outstr_plot <- ggplot(data = outstr_df)+
-    geom_errorbar(aes(x=reader, ymin=low_pred, ymax=high_pred),
-                  width=0.2, size=1.5, color=alpha(interval.col, alpha = 0.95))+
-    geom_point(aes(x=reader, y=mean_pred), size=4, color="white")+
-    geom_point(aes(x=reader, y=mean_pred), size=3.5, color="black")+
-    geom_point(aes(x=reader,y=obs_outstr), size=2, color=obs.col,
-               shape=18)+
-    graph_mets_theme+
-    xlab("")+
-    ylab("Outgoing movements per week")
-  
-  
-  grid.arrange(instr_plot, outstr_plot, nrow=2)
 
 ```
 
