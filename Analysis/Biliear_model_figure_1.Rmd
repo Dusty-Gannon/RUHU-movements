@@ -62,7 +62,7 @@ knitr::opts_chunk$set(echo = TRUE)
   mvmnts <- read.table(
     here(
       "Data",
-      "total_movements_by_year.tsv"
+      "total_movements_by_year2.tsv"
     ), header = T, sep = "\t", as.is = T)
   
   mvmnts$complex_i <- str_remove(mvmnts$reader_i, pattern = "_[[:alpha:]]+")
