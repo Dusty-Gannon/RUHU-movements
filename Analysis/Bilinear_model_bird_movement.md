@@ -1,7 +1,7 @@
 Sender-receiver Poisson model fit
 ================
 D. G. Gannon
-October 2020
+May 2021
 
 Let ![y\_{i,j,k} \\in
 \\mathbb{N}^+](https://latex.codecogs.com/png.latex?y_%7Bi%2Cj%2Ck%7D%20%5Cin%20%5Cmathbb%7BN%7D%5E%2B
@@ -52,7 +52,7 @@ To induce dependence among observations that involve reader
 {\\boldsymbol \\Sigma}\_{uw} \\right),\\\\&#10;{\\boldsymbol
 \\Sigma}\_{uw} &= \\begin{bmatrix}&#10;\\sigma\_{u}^2 &
 \\sigma\_{uw}\\\\&#10;\\sigma\_{uw} &
-\\sigma\_w^2&#10;\\end{bmatrix},&#10;\\end{split}&#10;](https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Baligned%7D%0A%5Cbegin%7Bbmatrix%7D%0Au_i%20%5C%5C%0Aw_i%0A%5Cend%7Bbmatrix%7D%20%26%5Csim%20%5Cmathcal%7BN%7D%5Cleft%28%7B%5Cbf%200%7D%2C%5C%20%7B%5Cboldsymbol%20%5CSigma%7D_%7Buw%7D%20%5Cright%29%2C%5C%5C%0A%7B%5Cboldsymbol%20%5CSigma%7D_%7Buw%7D%20%26%3D%20%5Cbegin%7Bbmatrix%7D%0A%5Csigma_%7Bu%7D%5E2%20%26%20%5Csigma_%7Buw%7D%5C%5C%0A%5Csigma_%7Buw%7D%20%26%20%5Csigma_w%5E2%0A%5Cend%7Bbmatrix%7D%2C%0A%5Cend%7Bsplit%7D%0A
+\\sigma\_w^2&#10;\\end{bmatrix},&#10;\\end{aligned}&#10;](https://latex.codecogs.com/png.latex?%0A%5Cbegin%7Baligned%7D%0A%5Cbegin%7Bbmatrix%7D%0Au_i%20%5C%5C%0Aw_i%0A%5Cend%7Bbmatrix%7D%20%26%5Csim%20%5Cmathcal%7BN%7D%5Cleft%28%7B%5Cbf%200%7D%2C%5C%20%7B%5Cboldsymbol%20%5CSigma%7D_%7Buw%7D%20%5Cright%29%2C%5C%5C%0A%7B%5Cboldsymbol%20%5CSigma%7D_%7Buw%7D%20%26%3D%20%5Cbegin%7Bbmatrix%7D%0A%5Csigma_%7Bu%7D%5E2%20%26%20%5Csigma_%7Buw%7D%5C%5C%0A%5Csigma_%7Buw%7D%20%26%20%5Csigma_w%5E2%0A%5Cend%7Bbmatrix%7D%2C%0A%5Cend%7Baligned%7D%0A
 "
 \\begin{aligned}
 \\begin{bmatrix}
@@ -63,7 +63,7 @@ w_i
 \\sigma_{u}^2 & \\sigma_{uw}\\\\
 \\sigma_{uw} & \\sigma_w^2
 \\end{bmatrix},
-\\end{split}
+\\end{aligned}
 ")  
 
 such that observations that have a common sender or receiver may be
