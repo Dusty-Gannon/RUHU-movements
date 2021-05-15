@@ -8,4 +8,5 @@ Figures/
 *.DS_Store
 MS_files/
 *.xlsx
-Data/all_visits2.txt
+Data/all_visits.txt
+Data/all_reads.txt
