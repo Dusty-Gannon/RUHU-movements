@@ -180,16 +180,16 @@ output:
 
 # Prob >1 movement between two readers given
 # 1) Both in open
-  w_open <- c(1,0,0,0.1,0)
-  loglam_open <- as.double(beta.mat%*%w_open)
+  w_open <- c(1,0.1,0,0)
+  loglam_open <- as.double(beta%*%w_open)
   ppois(0, lambda = c(exp(mean(loglam_open)),
                       exp(quantile(loglam_open, 0.025)),
                       exp(quantile(loglam_open, 0.975))),
         lower.tail = F)
   
 # 2) Both in forest
-  w_forest <- c(1,1,1,0.1,0)
-  loglam_forest <- as.double(beta.mat%*%w_forest)
+  w_forest <- c(1,0.1,0,1)
+  loglam_forest <- as.double(beta%*%w_forest)
   ppois(0, lambda = c(exp(mean(loglam_forest)),
                       exp(quantile(loglam_forest, 0.025)),
                       exp(quantile(loglam_forest, 0.975))),
