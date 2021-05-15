@@ -1,7 +1,7 @@
 ---
 title: "Sender-receiver Poisson model fit"
 author: "D. G. Gannon"
-date: "October 2020"
+date: "May 2021"
 output:
   github_document:
     pandoc_args: --webtex
@@ -43,26 +43,6 @@ knitr::opts_chunk$set(echo = TRUE)
   return(A)
  }
  
- check_energy <- function(fit, quiet=FALSE) {
-  sampler_params <- get_sampler_params(fit, inc_warmup=FALSE)
-  no_warning <- TRUE
-  for (n in 1:length(sampler_params)) {
-    energies = sampler_params[n][[1]][,'energy__']
-    numer = sum(diff(energies)**2) / length(energies)
-    denom = var(energies)
-    if (numer / denom < 0.2) {
-      if (!quiet) print(sprintf('Chain %s: E-FMI = %s', n, numer / denom))
-      no_warning <- FALSE
-    }
-  }
-  if (no_warning) {
-    if (!quiet) print('E-FMI indicated no pathological behavior')
-    if (quiet) return(TRUE)
-  } else {
-    if (!quiet) print('  E-FMI below 0.2 indicates you may need to reparameterize your model')
-    if (quiet) return(FALSE)
-  }
-}
 
 ```
 
@@ -85,7 +65,7 @@ w_i
 \sigma_{u}^2 & \sigma_{uw}\\
 \sigma_{uw} & \sigma_w^2
 \end{bmatrix},
-\end{split}
+\end{aligned}
 $$
 
 such that observations that have a common sender or receiver may be correlated. Importantly, this allows for the potential that good senders may be poor receivers, so negative correlation is a possibility. Finally, let
