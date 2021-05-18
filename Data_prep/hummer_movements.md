@@ -1,48 +1,52 @@
-Hummingbird Movement
+RUHU movements - Data prep
 ================
 Gannon et al.
-October 2020
+May 2021
 
 ## Overview
 
 The final dataset will include the frequency of hummingbird movements
 among different RFID readers across the HJA meadows in each of four
-years. We combine information on distances between readers, cover-type
-in which each reader was placed, and the proportion of intervening
-forest.
+years. We combine these movements with information on distances between
+readers, cover-type in which each reader was placed, and the proportion
+of intervening forest.
 
-#### Raw data
+#### Visit data
 
-The raw data include six columns of data and one row for each record of
-a PIT tag as passed through the reader. The fields include:
+The raw data have already been filtered down to records that constitute
+“separate” visits (reads separated by at least 30s or reads of
+different birds). To filter the raw read data down to the visit data,
+see the [reads\_to\_visits markdown file](). The visit data include six
+columns of data. The fields include:
 
   - PIT tag ID (character string)
 
-  - Date (yyyy-mm-dd)
+  - Date (yyyy-mm-dd) of visit
 
-  - Time (hh:mm:ss)
+  - Time (hh:mm:ss) of visit
 
   - Seconds past midnight (integer)
 
-  - Meadow complex ![\\in](https://latex.codecogs.com/png.latex?%5Cin
-    "\\in") {CM,LOM,M1,M2}
+  - Year ![\\in](https://latex.codecogs.com/png.latex?%5Cin "\\in")
+    {2014,2015,2016,2017}
 
-  - Reader position within the complex
-    ![\\in](https://latex.codecogs.com/png.latex?%5Cin "\\in")
-    {N,S,E,W,C} (sometimes SE or SW, etc.)
+  - Reader-feeder site (Complex\_reader)
 
 ![\~](https://latex.codecogs.com/png.latex?~ "~")
 
-**Read in RFID-reader data and reader location data:**
-
 ``` r
 #read in data
-   vis <- read.table(here("Data","all_visits2.txt"), 
-                   header = F, sep = "\t", as.is = T)
-   names(vis) <- c("bird", "date", "time", "seconds", "complex", "reader")
+   vis <- read.table(here("Data","all_visits.txt"), 
+                   header = T, sep = "\t", as.is = T)
+   
+# add complex id
+ split <- as.data.frame(str_split(vis$site, "_", simplify = T))
+ vis <- cbind(vis[,c(1:4)], split)
+   
+ names(vis) <- c("bird", "date", "time", "seconds", "complex", "reader")
 
 # remove headquarters test visits
-   vis <- vis[-which(vis$complex == "HQ"), ]
+   #vis <- vis[-which(vis$complex == "HQ"), ]
 
 # combine C-upper and C-lower with C
   # These readers are in the same meadow, 
@@ -50,6 +54,7 @@ a PIT tag as passed through the reader. The fields include:
   vis$reader[which(vis$reader == "CU")] <- "C"
   vis$reader[which(vis$reader == "CL")] <- "C"
   vis$reader[which(vis$reader == "CW")] <- "C"
+  vis$reader[which(vis$reader == "CE")] <- "C"
    
 # combine complex and reader to make unique identifier for each reader
   vis$reader <- paste(vis$complex, vis$reader, sep = "_")
@@ -60,13 +65,6 @@ a PIT tag as passed through the reader. The fields include:
 ```
 
 ![\~](https://latex.codecogs.com/png.latex?~ "~")
-
-Remove any duplicated observations. The data were sometimes downloaded
-multiple times and resulted in duplicates.
-
-``` r
-  vis <- vis[which(!duplicated(vis[,c(1:3)])), ]
-```
 
 **Convert records to movements**
 
@@ -92,7 +90,11 @@ the same day.
 # create variables for use later
   rdrs <- rlocs$reader
   nrdrs <- length(rdrs)
-  
+```
+
+**Loop to create movement data**
+
+``` r
 # create movement dataset
   birds_all <- unique(vis_sort$bird)
   yrs <- sort(unique(vis_sort$year))
@@ -111,7 +113,7 @@ the same day.
     cnts <- matrix(data=0, nrow = nrdrs, ncol = nrdrs)
      if(nrow(df_temp) > 1){
       for(i in 2:nrow(df_temp)){
-        if(df_temp$date[i] == df_temp$date[i-1] &
+        if((df_temp$date[i] == df_temp$date[i-1]) &
            (df_temp$bird[i] == df_temp$bird[i-1]) &
             (df_temp$reader[i] != df_temp$reader[i-1])){
           #if all conditions hold, find reader numbers
@@ -156,7 +158,7 @@ movements.**
   mv <- mv[-rows_ii, ]
 ```
 
-### Adding in landscape variables
+## Adding in landscape variables
 
 Now add in spatial data pertaining to each “edge”: distance between
 readers, proportion of intervening forest, and cover types connected by
@@ -186,7 +188,7 @@ the edge (i.e. meadow-meadow, meadow-mix, meadow-forest, meadow-scrub).
 # add distance to movement data
   mv$edgename <- paste(mv$reader1, mv$reader2, sep = "-")
   dist_list$edgename <- paste(dist_list$reader1, dist_list$reader2, sep = "-")
-  mv_wdist <- merge(mv, dist_list[,c(3,4)])
+  mv_wdist <- merge(mv, dist_list[,c(3,4)], sort=F)
 ```
 
 ![\~](https://latex.codecogs.com/png.latex?~ "~")
