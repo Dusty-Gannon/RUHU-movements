@@ -17,10 +17,24 @@ knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
   require(lubridate)
   require(here)
 
+# User-defined functions
+
+## Find which elements of a vector are not in another
+  `%notin%` <- Negate(`%in%`)
+  
+## length with null values
+  length2 <- function(x){
+    if(is.null(x)){
+      return(0)
+    } else{
+      return(length(x))
+    }
+  }
+
 ```
 
 ## Overview
- The final dataset will include the frequency of hummingbird movements among different RFID readers across the HJA meadows in each of four years. We combine these movements with information on distances between readers, cover-type in which each reader was placed, and the proportion of intervening forest.
+ The final dataset will include the frequency of hummingbird movements among different RFID readers across the HJA meadows in each of four years. We combine these movements with information on distances between readers, cover-type in which each reader was placed, and the proportion of intervening forest, as well as the number of birds using each feeder.
  
  
 #### Visit data
@@ -52,9 +66,6 @@ $~$
  vis <- cbind(vis[,c(1:4)], split)
    
  names(vis) <- c("bird", "date", "time", "seconds", "complex", "reader")
-
-# remove headquarters test visits
-   #vis <- vis[-which(vis$complex == "HQ"), ]
 
 # combine C-upper and C-lower with C
   # These readers are in the same meadow, 
@@ -105,10 +116,27 @@ $~$
 # create movement dataset
   birds_all <- unique(vis_sort$bird)
   yrs <- sort(unique(vis_sort$year))
-  mv_columns <- c("reader1", "reader2", "year", "count")
+  mv_columns <- c("reader1", "reader2", "year", "count", "birds1", "birds2")
   mv <- matrix(nrow = 1, ncol = length(mv_columns))
   colnames(mv) <- mv_columns
   mv <- as.data.frame(mv)
+  
+# create running list of birds using each feeder in each year
+  birds_at_feeders_cnt <- matrix(
+    data = 0,
+    nrow = nrdrs,
+    ncol = length(yrs)
+  )
+  rownames(birds_at_feeders) <- rdrs
+  colnames(birds_at_feeders) <- yrs
+  
+  birds_at_feeders <- tibble(
+    rdr = rdrs,
+    birds_2014 = vector(mode = "list", length = nrdrs),
+    birds_2015 = vector(mode= "list", length = nrdrs),
+    birds_2016 = vector(mode = "list", length = nrdrs),
+    birds_2017 = vector(mode = "list", length = nrdrs)
+  )
 
 # Fill dataframe with movements
   for(y in yrs){
@@ -123,31 +151,61 @@ $~$
         if((df_temp$date[i] == df_temp$date[i-1]) &
            (df_temp$bird[i] == df_temp$bird[i-1]) &
             (df_temp$reader[i] != df_temp$reader[i-1])){
-          #if all conditions hold, find reader numbers
+          # if all conditions hold, find reader numbers
             r1 <- which(rdrs == df_temp$reader[i-1])
             r2 <- which(rdrs == df_temp$reader[i])
           #add a count to that cell  
             cnts[r1,r2] <- cnts[r1,r2] + 1
+          # add bird counts
+            yr <- which(yrs == y)
+            if(
+              df_temp$bird[i] %notin%
+              birds_at_feeders[[yr+1]][[r1]]
+            ){
+            birds_at_feeders[[yr+1]][[r1]] <- 
+              c(
+                birds_at_feeders[[yr+1]][[r1]],
+                df_temp$bird[i]
+              )
+            }
+            if(
+              df_temp$bird[i] %notin%
+              birds_at_feeders[[yr+1]][[r2]]
+            ){
+              birds_at_feeders[[yr+1]][[r2]] <- 
+              c(
+                birds_at_feeders[[yr+1]][[r2]],
+                df_temp$bird[i]
+              )
+            }
         }
       }
      }
+      # get counts of birds at feeders
+      bird_cnts <- map_dbl(as.list(birds_at_feeders[[yr+1]]),
+                           ~length(.x))
       # combine with movement dataframe
       if(y=="2014"){
         rems <- which(rlocs$meadow_complex == "CM" | rlocs$meadow_complex == "LOM")
         cnts_y <- cnts[-rems,-rems]
         rdrs_y <- rdrs[-rems]
+        brdcnts_y <- bird_cnts[-rems]
       } else if(y=="2015"){
         rems <- which(rlocs$meadow_complex == "CM")
         rdrs_y <- rdrs[-rems]
         cnts_y <- cnts[-rems,-rems]
+        brdcnts_y <- bird_cnts[-rems]
       } else{
         rdrs_y <- rdrs
         cnts_y <- cnts
+        brdcnts_y <- bird_cnts
       }
         df_temp2 <- data.frame(reader1=rep(rdrs_y, length(rdrs_y)),
                                reader2=rep(rdrs_y, each=length(rdrs_y)),
                                year=rep(y, length(rdrs_y)^2),
-                               count=as.vector(cnts_y))
+                               count=as.vector(cnts_y),
+                               birds1=rep(brdcnts_y, length(rdrs_y)),
+                               birds2=rep(brdcnts_y, each=length(rdrs_y)))
         mv <- rbind(mv, df_temp2)
     
   }
@@ -273,11 +331,13 @@ $~$
                         by.y="ID")
 # reorder
    cols.order <- c("reader1", "reader2", "year", "hab1", "hab2", 
-                   "p_for1", "p_for2", "dist.km", "forest", "count")
+                   "p_for1", "p_for2", "dist.km", "forest", "count",
+                   "birds1", "birds2")
    mv_noedgename <- mv_wpropfor[,cols.order]
    
   names(mv_noedgename) <- c("reader_i", "reader_j", "year", "hab_i", "hab_j",
-                  "pfor_100m_i", "pfor_100m_j", "dist_ij", "pfor_ij", "count")
+                  "pfor_100m_i", "pfor_100m_j", "dist_ij", "pfor_ij", "count",
+                  "nbirds_i", "nbirds_j")
   
 # now create a dyad identifier
   mv_noedgename$dyad <- NA
@@ -286,7 +346,10 @@ $~$
     mv_noedgename$dyad[i] <- paste(dyad_i, collapse = '-')
   }
   
-  mv_noedgename <- mv_noedgename[,c(1,2,11,3:10)]
+  mv_noedgename <- mv_noedgename[,c(
+    1,2, ncol(mv_noedgename),
+    3:(ncol(mv_noedgename)-1)
+  )]
 
 ```
 
