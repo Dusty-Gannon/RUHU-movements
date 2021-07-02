@@ -62,7 +62,7 @@ knitr::opts_chunk$set(echo = TRUE)
   mvmnts <- read.table(
     here(
       "Data",
-      "total_movements_by_year2.tsv"
+      "total_movements_by_year.tsv"
     ), header = T, sep = "\t", as.is = T)
   
   mvmnts$complex_i <- str_remove(mvmnts$reader_i, pattern = "_[[:alpha:]]+")
@@ -114,11 +114,11 @@ knitr::opts_chunk$set(echo = TRUE)
  
  graph_plot <- ggplot() +
    geom_raster(data = forest_df, aes(x=x, y=y, fill=as.factor(forest)))+
-   geom_segment(data = mvs_all_df, 
+   geom_segment(data = mvs_all_df,
                 aes(x=x_i, xend=x_j, y=y_i, yend=y_j),
                 lineend = "round", size=mvs_all_df$obs/max(mvs_all_df$obs)*8,
                 color=edge.col)+
-   geom_point(data = rlocs, aes(x=x,y=y), size=5)+
+   geom_point(data = rlocs, aes(x=x,y=y), size=1)+
    geom_point(data = rlocs, aes(x=x,y=y), color="white", size=4)+
    geom_point(data = caplocs, aes(x=x,y=y), color=highlight, size=4)+
    geom_segment(aes(x=570600, xend=571600, y=4902500, yend=4902500),
@@ -138,12 +138,12 @@ knitr::opts_chunk$set(echo = TRUE)
          plot.title = element_text(face = "bold", size = 18))
    
  
- png(filename = here(
-   "Figures",
-   "reader_map_figure_1.png"
- ), height = 3600, width = 3000, res = 300)
-   graph_plot
- dev.off()
+ # png(filename = here(
+ #   "Figures",
+ #   "reader_map_figure_1.png"
+ # ), height = 3600, width = 3000, res = 300)
+ #   graph_plot
+ # dev.off()
 
 ```
 
