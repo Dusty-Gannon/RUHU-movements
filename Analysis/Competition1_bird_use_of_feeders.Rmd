@@ -1,0 +1,369 @@
+---
+title: "Pairing automated mark-recapture and social network models to explore the effects of landscape configuration on hummingbird foraging patterns - Bird use of different feeders"
+author: "D. G. Gannon, A. S. Hadley, S. J. K. Frey"
+date: "June 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+  require(tidyverse)
+  require(here)
+  require(lubridate)
+  require(ggmap)
+  require(gridExtra)
+  require(lme4)
+  require(raster)
+
+# Functions
+  `%notin%` <- Negate(`%in%`)
+  
+## Shannon-diversity
+  diversity <- function(x){
+    p <- x/sum(x)
+    -sum(p*log(p))
+  }
+
+```
+
+
+## Data
+
+```{r data}
+#read in data
+   rds <- read.table(here("Data","all_reads.txt"), 
+                   header = T, sep = "\t", as.is = T)
+
+# decompose reader id into a complex id and location
+  split <- as.data.frame(str_split(rds$site, "_", simplify = T))
+  rds <- cbind(rds[,c(1:4)], split)
+  names(rds) <- c("bird", "date", "time", "seconds", "complex", "reader")
+
+# remove split for the sake of memory
+  rm(split)
+
+# combine C-upper and C-lower with C
+  # These readers are in the same meadow, 
+  # so we can consider visits as evidence the bird is in that meadow
+  rds$reader[which(rds$reader == "CU")] <- "C"
+  rds$reader[which(rds$reader == "CL")] <- "C"
+  rds$reader[which(rds$reader == "CW")] <- "C"
+  rds$reader[which(rds$reader == "CE")] <- "C"
+  
+# combine complex and reader to make unique identifier for each reader
+  rds$reader <- paste(rds$complex, rds$reader, sep = "_")
+  
+### Sanity check ###
+  #unique(rds$reader)
+
+# order the dataframe
+  rds_sort <- rds[order(rds$bird, rds$date, rds$seconds), ]
+
+# add a column for the year
+  rds_sort$year <- str_extract(rds_sort$date, "[[:digit:]]{4}")
+  
+### Sanity check ###
+  #unique(rds_sort$year)
+  
+# turn date into day of the year
+  rds_sort$date2 <- ymd(rds_sort$date)
+  rds_sort$day <- yday(rds_sort$date)
+
+# visit data
+  vis <- read.table(file = here(
+    "Data",
+    "all_visits.txt"
+  ), 
+  header = T, sep = "\t")
+
+## create complex column
+  split2 <- as.data.frame(str_split(vis$site, "_", simplify = T))
+  vis <- cbind(vis[,c(1:5)], split2)
+  names(vis) <- c("bird", "date", "time", "seconds", "year", "complex", "reader")
+  
+## combine center-upper and center-lower
+  vis$reader[which(vis$reader == "CU")] <- "C"
+  vis$reader[which(vis$reader == "CL")] <- "C"
+  vis$reader[which(vis$reader == "CW")] <- "C"
+  vis$reader[which(vis$reader == "CE")] <- "C" 
+  
+## relabel reader
+  vis$reader <- paste(vis$complex, vis$reader, sep = "_")
+  
+## remove split2
+  rm(split2)
+
+    
+# reader data
+  rlocs <- read.table(file = here(
+    "Data",
+    "hja_reader_locations_centercomb.txt"
+  ), header = T, sep = "\t")
+  
+  
+# Capture data
+  caps <- read_csv(
+    here("Data", "hja_hummingbird_captures_rfid.csv")
+  )
+
+## remove records of returning birds
+  caps <- caps[-which(duplicated(caps$rfid)), ]
+  
+```
+
+## Highly used feeders
+
+```{r}
+
+# Which feeders were used by the most birds?
+  numbirds_rdrs <- group_by(vis, reader, year) %>%
+    summarise(
+      num_birds = length(unique(bird)),
+      num_vis = n()
+    )
+
+# add Shannon index
+  vis_per_bird <- group_by(vis, reader, year, bird) %>%
+    summarise(
+      n = n()
+    )
+  
+  div <- group_by(vis_per_bird, reader, year) %>%
+    summarise(
+      div = exp(diversity(n))
+    )
+  
+## add to other dataset
+  numbirds_rdrs$div <- div$div
+  
+  
+# average for each year
+  avnumbirds_rdrs <- group_by(numbirds_rdrs, reader) %>%
+    summarise(
+      mean_num_birds = mean(num_birds),
+      mean_vis = mean(num_vis),
+      mean_div = mean(div)
+    )
+  
+# merge reader data
+  avnumbirds_rdrs <- merge(
+    avnumbirds_rdrs,
+    rlocs[,c("reader", "trtmnt", "x", "y", "days_active", "years")],
+    all.y=T
+  )
+  
+# correct for 2 feeders in center meadows
+  split3 <- str_split(avnumbirds_rdrs$reader, pattern = "_", simplify = T)
+  cents <- which(split3[,2] == "C")
+  avnumbirds_rdrs$days_active[cents] <- avnumbirds_rdrs$days_active[cents]*2
+  
+# fill in NAs
+  avnumbirds_rdrs[is.na(avnumbirds_rdrs)] <- 0
+  
+# days per year
+  avnumbirds_rdrs$days_per_year <- avnumbirds_rdrs$days_active/avnumbirds_rdrs$years
+  
+
+```
+
+**Plots for feeder use by different birds and total visits**
+
+This code can be used to reproduce Figure S15 in the supplementary material.
+
+```{r}
+# forest raster
+  forest <- raster(
+    here(
+      "Data",
+      "forest.tif"
+    )
+  )
+  forest_df <- as.data.frame(forest, xy=T)
+  
+# colors for plot
+  forest.col1 <- "grey" 
+  forest.col2 <- "#4a7c59"
+  nonforest.col <- "#F4F1DE"
+  rdr.col <- "#9A031E"
+  
+  bird_counts <- ggplot() +
+   geom_raster(data = forest_df, aes(x=x, y=y, fill=as.factor(forest)))+
+   geom_point(data = avnumbirds_rdrs, aes(x=x,y=y, size=mean_num_birds), color="black")+
+   geom_segment(aes(x=570600, xend=571600, y=4902500, yend=4902500),
+              size=2.5)+
+   annotate("text", x=570600, y=4902300,
+   label="1 km", hjust=0)+
+   scale_fill_manual(
+     name="Cover type",
+     values=c(nonforest.col, forest.col2),
+     labels=c("non-forest", "forest")
+   )+
+   scale_size_continuous(
+     name = "Number of birds",
+     breaks = c(6,3,1)
+   )+
+   xlim(c(567000,572000))+
+   ylim(c(4894000,4904000))+
+   theme(panel.background = element_blank(),
+         #legend.key = element_rect(fill = "black"),
+         legend.text = element_text(size=18),
+         axis.title = element_blank(),
+         axis.text = element_blank(),
+         axis.ticks = element_blank(),
+         plot.title = element_text(face = "bold", size = 18))+
+    ggtitle("a)")
+  
+  vis_counts <- ggplot() +
+   geom_raster(data = forest_df, aes(x=x, y=y, fill=as.factor(forest)))+
+   geom_point(data = avnumbirds_rdrs, aes(x=x,y=y, size=mean_vis), color="black")+
+   geom_segment(aes(x=570600, xend=571600, y=4902500, yend=4902500),
+              size=2.5)+
+   annotate("text", x=570600, y=4902300,
+   label="1 km", hjust=0)+
+   scale_fill_manual(
+     name="Cover type",
+     values=c(nonforest.col, forest.col2),
+     labels=c("non-forest", "forest")
+   )+
+   scale_size_continuous(
+     name = "Number of recorded visits"
+   )+
+   xlim(c(567000,572000))+
+   ylim(c(4894000,4904000))+
+   theme(panel.background = element_blank(),
+         #legend.key = element_rect(fill = "black"),
+         legend.text = element_text(size=18),
+         axis.title = element_blank(),
+         axis.text = element_blank(),
+         axis.ticks = element_blank(),
+         plot.title = element_text(face = "bold", size = 18))+
+    ggtitle("b)")
+  
+  div_plot <- ggplot() +
+   geom_raster(data = forest_df, aes(x=x, y=y, fill=as.factor(forest)))+
+   geom_point(data = avnumbirds_rdrs, aes(x=x,y=y, size=mean_div), color="black")+
+   geom_segment(aes(x=570600, xend=571600, y=4902500, yend=4902500),
+              size=2.5)+
+   annotate("text", x=570600, y=4902300,
+   label="1 km", hjust=0)+
+   scale_fill_manual(
+     name="Cover type",
+     values=c(nonforest.col, forest.col2),
+     labels=c("non-forest", "forest")
+   )+
+   scale_size_continuous(
+     name = "Shannon Diversity"
+   )+
+   xlim(c(567000,572000))+
+   ylim(c(4894000,4904000))+
+   theme(panel.background = element_blank(),
+         #legend.key = element_rect(fill = "black"),
+         legend.text = element_text(size=18),
+         axis.title = element_blank(),
+         axis.text = element_blank(),
+         axis.ticks = element_blank(),
+         plot.title = element_text(face = "bold", size = 18))+
+    ggtitle("c)")
+  
+# add frequency of each in each treatment type
+  freq_in_hab <- group_by(avnumbirds_rdrs, trtmnt) %>%
+    summarise(
+      birds = mean(mean_num_birds),
+      vis = mean(mean_vis/days_per_year),
+      div = mean(mean_div)
+    )
+  freq_in_hab$trtmnt <- factor(
+    freq_in_hab$trtmnt,
+    levels = c("center", "connected", "isolated", "forest")
+  )
+  
+  barplot_birds <- ggplot(data = freq_in_hab)+
+    geom_bar(aes(x=trtmnt, y=birds), stat = "identity")+
+    theme_classic()+
+    ylab("Mean number of birds per year")+
+    xlab("")+
+    ggtitle("d)")
+  
+  barplot_vis <- ggplot(data = freq_in_hab)+
+    geom_bar(aes(x=trtmnt, y=vis), stat = "identity")+
+    theme_classic()+
+    ylab("Mean number of visits per feeder-day")+
+    xlab("")+
+    ggtitle("e)")
+  
+  barplot_div <- ggplot(data = freq_in_hab)+
+    geom_bar(aes(x=trtmnt, y=div), stat = "identity")+
+    theme_classic()+
+    xlab("Feeder type")+
+    ylab("Mean bird diversity per year")+
+    ggtitle("f)")
+  
+  rich_div <- ggplot(data = avnumbirds_rdrs)+
+    geom_point(aes(x=mean_num_birds, y=mean_div))+
+    geom_abline(slope = 1, intercept = 0, linetype="dashed")+
+    theme_classic()+
+    ylim(c(0,7))+
+    xlab("Richness of birds")+
+    ylab("Shannon diversity")+
+    ggtitle("g)")
+  
+  
+  lo <- rbind(
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(1,1,1,1,2,2,2,2),
+    c(3,3,3,3,4,4,NA,NA),
+    c(3,3,3,3,4,4,NA,NA),
+    c(3,3,3,3,5,5,NA,NA),
+    c(3,3,3,3,5,5,NA,NA),
+    c(3,3,3,3,6,6,NA,NA),
+    c(3,3,3,3,6,6,NA,NA),
+    c(3,3,3,3,7,7,NA,NA),
+    c(3,3,3,3,7,7,NA,NA)
+  )
+  
+png(filename = here(
+  "Figures",
+  "figure_S15_bird_vis_counts.png"
+), height = 6000, width = 4800, res = 300, units = "px")
+  grid.arrange(
+    bird_counts, 
+    vis_counts,
+    div_plot,
+    barplot_birds,
+    barplot_vis,
+    barplot_div,
+    rich_div,
+    layout_matrix=lo
+  )
+dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

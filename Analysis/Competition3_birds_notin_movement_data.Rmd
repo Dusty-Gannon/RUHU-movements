@@ -1,0 +1,323 @@
+---
+title: "Pairing automated mark-recapture and social network models to explore the effects of landscape configuration on hummingbird foraging patterns - Bird use of different feeders"
+author: "D. G. Gannon, A. S. Hadley, S. J. K. Frey"
+date: "June 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+  require(tidyverse)
+  require(here)
+  require(lubridate)
+  require(ggmap)
+  require(gridExtra)
+  require(lme4)
+  require(raster)
+
+# Functions
+  `%notin%` <- Negate(`%in%`)
+  
+## Shannon-diversity
+  diversity <- function(x){
+    p <- x/sum(x)
+    -sum(p*log(p))
+  }
+
+```
+
+
+## Data
+
+```{r data}
+#read in data
+   rds <- read.table(here("Data","all_reads.txt"), 
+                   header = T, sep = "\t", as.is = T)
+
+# decompose reader id into a complex id and location
+  split <- as.data.frame(str_split(rds$site, "_", simplify = T))
+  rds <- cbind(rds[,c(1:4)], split)
+  names(rds) <- c("bird", "date", "time", "seconds", "complex", "reader")
+
+# remove split for the sake of memory
+  rm(split)
+
+# combine C-upper and C-lower with C
+  # These readers are in the same meadow, 
+  # so we can consider visits as evidence the bird is in that meadow
+  rds$reader[which(rds$reader == "CU")] <- "C"
+  rds$reader[which(rds$reader == "CL")] <- "C"
+  rds$reader[which(rds$reader == "CW")] <- "C"
+  rds$reader[which(rds$reader == "CE")] <- "C"
+  
+# combine complex and reader to make unique identifier for each reader
+  rds$reader <- paste(rds$complex, rds$reader, sep = "_")
+  
+### Sanity check ###
+  #unique(rds$reader)
+
+# order the dataframe
+  rds_sort <- rds[order(rds$bird, rds$date, rds$seconds), ]
+
+# add a column for the year
+  rds_sort$year <- str_extract(rds_sort$date, "[[:digit:]]{4}")
+  
+### Sanity check ###
+  #unique(rds_sort$year)
+  
+# turn date into day of the year
+  rds_sort$date2 <- ymd(rds_sort$date)
+  rds_sort$day <- yday(rds_sort$date)
+
+# visit data
+  vis <- read.table(file = here(
+    "Data",
+    "all_visits.txt"
+  ), 
+  header = T, sep = "\t")
+
+## create complex column
+  split2 <- as.data.frame(str_split(vis$site, "_", simplify = T))
+  vis <- cbind(vis[,c(1:5)], split2)
+  names(vis) <- c("bird", "date", "time", "seconds", "year", "complex", "reader")
+  
+## combine center-upper and center-lower
+  vis$reader[which(vis$reader == "CU")] <- "C"
+  vis$reader[which(vis$reader == "CL")] <- "C"
+  vis$reader[which(vis$reader == "CW")] <- "C"
+  vis$reader[which(vis$reader == "CE")] <- "C" 
+  
+## relabel reader
+  vis$reader <- paste(vis$complex, vis$reader, sep = "_")
+  
+## remove split2
+  rm(split2)
+
+    
+# reader data
+  rlocs <- read.table(file = here(
+    "Data",
+    "hja_reader_locations_centercomb.txt"
+  ), header = T, sep = "\t")
+  
+  
+# Capture data
+  caps <- read_csv(
+    here("Data", "hja_hummingbird_captures_rfid.csv")
+  )
+
+## remove records of returning birds
+  caps <- caps[-which(duplicated(caps$rfid)), ]
+  
+```
+
+
+
+## Birds that were not recorded moving
+
+We relocated 63 Rufous Hummingbirds after the initial capture and PIT tag implantation, 28 of which were recorded moving among feeders on at least one occasion. For the remaining 35 birds, what feeders were they using and what was the apparent length of their tenure at these locations?
+
+**Convert to movements to get a list of birds that moved among feeders**
+
+```{r}
+
+# make sure data is in right order
+  vis_sort <- vis[order(vis$bird, vis$date, vis$seconds), ]
+
+# create empty dataframe
+ mvs_by_bird <- as.data.frame(
+   matrix(nrow = nrow(vis_sort), ncol = 3)
+ )
+ names(mvs_by_bird) <- c(
+   "bird",
+   "reader1",
+   "reader2"
+ )
+ 
+# loop through to get 
+ for(i in 2:nrow(vis_sort)){
+   if(
+     (vis_sort$bird[i] == vis_sort$bird[(i-1)]) &
+     (vis_sort$date[i] == vis_sort$date[(i-1)]) &
+     (vis_sort$reader[i] != vis_sort$reader[(i-1)])
+   ){
+     mvs_by_bird[i,] <- c(
+       vis_sort$bird[i],
+       vis_sort$reader[(i-1)],
+       vis_sort$reader[i]
+     )
+   }
+ }
+ 
+ mvs_by_bird <- na.omit(mvs_by_bird)
+
+```
+
+**Subset visit data for birds that didn't move**
+
+```{r}
+
+# get list of birds in movement data
+  mv_birds <- unique(mvs_by_bird$bird)
+
+# subset visit data
+  vis_sub <- vis[
+    which(vis$bird %notin% mv_birds),
+  ]
+  
+# Merge in reader and demographic data
+  vis_sub <- merge(
+    vis_sub,
+    rlocs[,c("reader","habitat", "prop_for100")],
+  )
+  
+## to merge in banding data,
+##  take last five digits of rfid
+  vis_sub$ffive <- str_sub(
+    vis_sub$bird, 1, 5
+  )
+  
+  vis_sub <- merge(
+    vis_sub,
+    caps[,c("sex", "age", "rfid")],
+    by.x="ffive",
+    by.y="rfid"
+  )
+
+```
+
+**Summaries of these data**
+
+```{r}
+
+# use of different readers
+  use_by_rdr <- vis_sub %>% 
+                group_by(reader) %>%
+                summarise(
+                  n=n()
+                )
+
+# sex ratios and tenure
+  tenure_by_site <- vis_sub %>%
+    group_by(bird, reader) %>%
+    summarise(
+      sex=unique(sex),
+      days=length(unique(date)),
+      yrs=length(unique(year))
+    )
+  
+# which birds were present over more than 10 days?
+  days_by_bird <- vis_sub %>%
+    group_by(bird) %>%
+    summarise(
+      days=length(unique(date)),
+      yrs = length(unique(year))
+    )
+  terr_holders <- days_by_bird$bird[
+    which(days_by_bird$days >= 10)
+  ]
+
+```
+
+**Subset raw read data for birds with long tenures on the landscape**
+
+```{r}
+
+# subset
+  rds_sub <- rds_sort[
+    which(rds_sort$bird %in% terr_holders),
+  ]
+
+# summarize usage at readers
+  rds_by_rdr_sub <- group_by(rds_sub, bird, reader, year) %>%
+    summarise(
+      n=n()
+    )
+  
+# did these birds monopolize the reads?
+  rds_by_rdr_all <- group_by(rds_sort, bird, reader, year) %>%
+    summarise(
+      n=n()
+    )
+  rds_by_rdr_foc <- rds_by_rdr_all[
+    which(rds_by_rdr_all$reader %in% rds_by_rdr_sub$reader),
+  ]
+  rds_by_rdr_foc <- 
+    rds_by_rdr_foc[order(rds_by_rdr_foc$reader, rds_by_rdr_foc$year), ]
+  
+
+```
+
+**Subset visit data for birds with long tenures**
+
+```{r}
+
+# subset
+  vis_sub_ten <- vis_sort[
+    which(vis_sort$bird %in% terr_holders),
+  ]
+
+# summarize usage at readers
+  vis_by_rdr <- group_by(vis_sub_ten, bird, reader, year) %>%
+    summarise(
+      n=n()
+    )
+  
+# did these birds monopolize the feeders?
+  vis_by_rdr_all <- group_by(vis_sort, bird, reader, year) %>%
+    summarise(
+      n=n()
+    )
+  vis_by_rdr_foc <- vis_by_rdr_all[
+    which(vis_by_rdr_all$reader %in% vis_by_rdr$reader),
+  ]
+  vis_by_rdr_foc <- 
+    vis_by_rdr_foc[order(vis_by_rdr_foc$reader, vis_by_rdr_foc$year), ]
+  
+# compute percentage of visits by each of these birds
+  vis_by_rdr$prop_visits <- 0
+  for(i in 1:nrow(vis_by_rdr)){
+    df_sub <- vis_by_rdr_foc[
+      which(
+        vis_by_rdr_foc$reader == vis_by_rdr$reader[i] &
+        vis_by_rdr_foc$year == vis_by_rdr$year[i]
+      ),
+    ]
+    
+    row_num <- which(df_sub$bird == vis_by_rdr$bird[i])
+    vis_by_rdr$prop_visits[i] <- df_sub$n[row_num]/sum(df_sub$n)
+  }
+  
+# make table for table in supplement
+  vis_by_rdr$Sex <- c("F", "M", "M", "M", "F", "F", "F")
+  
+  tS1 <- data.frame(
+    vis_by_rdr$bird,
+    vis_by_rdr$Sex,
+    vis_by_rdr$year,
+    vis_by_rdr$reader,
+    round(vis_by_rdr$prop_visits, digits = 3)
+    )
+  
+  names(tS1) <- c(
+    "Bird ID",
+    "Sex",
+    "Year",
+    "Feeder",
+    "Proportion of visits"
+  )
+  
+  saveRDS(tS1, file = here(
+    "Data",
+    "table_S1.rds"
+  ))
+
+```
+
+
+

@@ -1,0 +1,294 @@
+---
+title: "Pairing automated mark-recapture and social network models to explore the effects of landscape configuration on hummingbird foraging patterns - Were birds more likely to move after a visit to a busy feeder?"
+author: "D. G. Gannon, A. S. Hadley, S. J. K. Frey"
+date: "June 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+  require(tidyverse)
+  require(here)
+  require(lubridate)
+  require(ggmap)
+  require(gridExtra)
+  require(lme4)
+  require(raster)
+
+# Functions
+  `%notin%` <- Negate(`%in%`)
+  
+```
+
+
+## Data
+
+```{r data}
+#read in data
+   rds <- read.table(here("Data","all_reads.txt"), 
+                   header = T, sep = "\t", as.is = T)
+
+# decompose reader id into a complex id and location
+  split <- as.data.frame(str_split(rds$site, "_", simplify = T))
+  rds <- cbind(rds[,c(1:4)], split)
+  names(rds) <- c("bird", "date", "time", "seconds", "complex", "reader")
+
+# remove split for the sake of memory
+  rm(split)
+
+# combine C-upper and C-lower with C
+  # These readers are in the same meadow, 
+  # so we can consider visits as evidence the bird is in that meadow
+  rds$reader[which(rds$reader == "CU")] <- "C"
+  rds$reader[which(rds$reader == "CL")] <- "C"
+  rds$reader[which(rds$reader == "CW")] <- "C"
+  rds$reader[which(rds$reader == "CE")] <- "C"
+  
+# combine complex and reader to make unique identifier for each reader
+  rds$reader <- paste(rds$complex, rds$reader, sep = "_")
+  
+### Sanity check ###
+  #unique(rds$reader)
+
+# order the dataframe
+  rds_sort <- rds[order(rds$bird, rds$date, rds$seconds), ]
+
+# add a column for the year
+  rds_sort$year <- str_extract(rds_sort$date, "[[:digit:]]{4}")
+  
+### Sanity check ###
+  #unique(rds_sort$year)
+  
+# turn date into day of the year
+  rds_sort$date2 <- ymd(rds_sort$date)
+  rds_sort$day <- yday(rds_sort$date)
+
+# visit data
+  vis <- read.table(file = here(
+    "Data",
+    "all_visits.txt"
+  ), 
+  header = T, sep = "\t")
+
+## create complex column
+  split2 <- as.data.frame(str_split(vis$site, "_", simplify = T))
+  vis <- cbind(vis[,c(1:5)], split2)
+  names(vis) <- c("bird", "date", "time", "seconds", "year", "complex", "reader")
+  
+## combine center-upper and center-lower
+  vis$reader[which(vis$reader == "CU")] <- "C"
+  vis$reader[which(vis$reader == "CL")] <- "C"
+  vis$reader[which(vis$reader == "CW")] <- "C"
+  vis$reader[which(vis$reader == "CE")] <- "C" 
+  
+## relabel reader
+  vis$reader <- paste(vis$complex, vis$reader, sep = "_")
+  
+## remove split2
+  rm(split2)
+
+    
+# reader data
+  rlocs <- read.table(file = here(
+    "Data",
+    "hja_reader_locations_centercomb.txt"
+  ), header = T, sep = "\t")
+  
+  
+# Capture data
+  caps <- read_csv(
+    here("Data", "hja_hummingbird_captures_rfid.csv")
+  )
+
+## remove records of returning birds
+  caps <- caps[-which(duplicated(caps$rfid)), ]
+  
+```
+
+## Were birds more likely to move during times of high feeder use?
+
+```{r}
+
+# sort by feeder then day
+  vis_rdr_sort <- vis[
+    order(vis$reader, vis$date, vis$time),
+  ]
+  vis_rdr_sort$datetime <- ymd_hms(
+    paste(vis_rdr_sort$date, vis_rdr_sort$time, sep=" ")
+  )
+  vis_rdr_sort$date_num <- as.numeric(vis_rdr_sort$datetime)
+
+  rdrs <- unique(vis_rdr_sort$reader)
+  yrs <- c(2014,2015,2016,2017)
+  
+  rdr_use <- data.frame(
+    datetime = vis_rdr_sort$datetime[1],
+    num_birds = NA,
+    rdr=NA
+  )
+  
+  
+for(r in rdrs){
+  for(y in yrs){
+    df_sub <- subset(vis_rdr_sort, reader==r & year==y)
+    if(nrow(df_sub) > 0){
+      rdr_use_times <- df_sub$datetime[1]
+      rdr_use_birds <- NA
+      rdr_use_yr <- NA
+  
+      lower <- df_sub$datetime[1]
+      upper <- df_sub$datetime[1]+600
+      while (lower < df_sub$datetime[nrow(df_sub)]) {
+        df_sub_sub <- df_sub[
+          which(
+            df_sub$datetime >= lower &
+            df_sub$datetime <= upper
+          ),
+        ]
+    
+        rdr_use_times <- c(rdr_use_times, lower)
+        rdr_use_birds <- c(
+          rdr_use_birds,
+          length(unique(df_sub_sub$bird))
+        )
+        rdr_use_yr <- c(rdr_use_yr, y)
+        lower <- lower+600
+        upper <- upper+600
+      }
+      
+      temp <- data.frame(
+        datetime = rdr_use_times[-1],
+        num_birds = rdr_use_birds[-1],
+        rdr = r
+      )
+      
+      rdr_use <- rbind(
+        rdr_use,
+        temp
+      )
+    }
+  }
+}
+
+```
+
+**Now ask what the feeder use was prior to a movement**
+
+```{r}
+
+# sort by bird, then by time
+  vis_bird_sort <- vis[order(vis$bird, vis$date, vis$seconds), ]
+
+# add datetime
+  vis_bird_sort$datetime <- ymd_hms(
+    paste(vis_bird_sort$date, vis_bird_sort$time, sep=" ")
+  )
+  vis_bird_sort$date_num <- as.numeric(vis_bird_sort$datetime)
+
+# create empty dataframe
+ mvs_by_bird <- as.data.frame(
+   matrix(nrow = nrow(vis_bird_sort), ncol = 3)
+ )
+ names(mvs_by_bird) <- c(
+   "bird",
+   "reader1",
+   "reader2"
+ )
+ 
+ time1 <- vis_bird_sort$datetime[1]
+ time2 <- vis_bird_sort$datetime[1]
+ 
+# loop through to get 
+ for(i in 2:nrow(vis_bird_sort)){
+   if(
+     (vis_bird_sort$bird[i] == vis_bird_sort$bird[(i-1)]) &
+     (vis_bird_sort$date[i] == vis_bird_sort$date[(i-1)]) &
+     (vis_bird_sort$reader[i] != vis_bird_sort$reader[(i-1)])
+   ){
+     mvs_by_bird[i,] <- c(
+       vis_bird_sort$bird[i],
+       vis_bird_sort$reader[(i-1)],
+       vis_bird_sort$reader[i]
+     )
+     time1 <- c(time1, vis_bird_sort$datetime[(i-1)])
+     time2 <- c(time2, vis_bird_sort$datetime[i])
+   }
+ }
+ 
+ mvs_by_bird <- na.omit(mvs_by_bird)
+ mvs_by_bird$datetime1 <- time1[-1]
+ mvs_by_bird$datetime2 <- time2[-1]
+
+```
+
+**Combine all this information into the visit data**
+
+```{r}
+
+# only birds that moved
+  mving_birds <- vis_bird_sort[
+    which(vis_bird_sort$bird %in% unique(mvs_by_bird$bird)),
+  ]
+
+# add column for visits prior to movement
+  mving_birds$move <- 0
+  mving_birds$move[
+    which(mving_birds$datetime %in% mvs_by_bird$datetime1)
+  ] <- 1
+  
+# add column with feeder use prior to movement
+  mving_birds$rdr_use <- 0
+  for(i in 1:nrow(mving_birds)){
+    rdr_sub <- subset(rdr_use, rdr == mving_birds$reader[i])
+    # ensure the order is correct
+    rdr_sub <- rdr_sub[order(rdr_sub$datetime), ]
+    times_below <- which(rdr_sub$datetime <= mving_birds$datetime[i])
+    window <- max(times_below)
+    mving_birds$rdr_use[i] <- rdr_sub$num_birds[window]
+  }
+
+```
+
+**Fit a model**
+
+```{r}
+
+# factor the bird
+  mving_birds$f.bird <- as.factor(mving_birds$bird)
+  
+  m1 <- glmer(
+    move~rdr_use + (1|bird), 
+    family = "binomial",
+    data = mving_birds
+  )
+  
+  summary(m1)
+  
+  pred_logistic <- function(x, b0=m1@beta[1], b1=m1@beta[2]){
+    1/(1+exp(-(b0+b1*x)))
+  }
+  
+ggplot(data = mving_birds)+
+    geom_jitter(aes(x=rdr_use, y=move),
+               alpha=0.2, width = 0.5, height = 0)+
+    geom_function(fun = pred_logistic, color="blue")+
+    theme_classic()+
+    xlab("Number of birds using a feeder")+
+    ylab("P(focal bird leaves)")
+
+# png(filename = here(
+#   "Figures",
+#   "competition_plot.png"
+# ), width = 900, height = 900, res = 300, units="px")
+#   comp_plot
+# dev.off()
+
+```
+
+
+
