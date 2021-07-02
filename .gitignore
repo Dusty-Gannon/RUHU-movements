@@ -1,6 +1,5 @@
 .Rproj.user
 .Rhistory
-*.RData
 .Ruserdata
 Figures/
 *.Rproj
@@ -10,3 +9,11 @@ MS_files/
 *.xlsx
 Data/all_visits.txt
 Data/all_reads.txt
+
+# all rds and rdata files
+*.rds
+*.RData
+
+# keep all capture data private for the time being
+Data/hja_hummingbird_captures_all*
+
