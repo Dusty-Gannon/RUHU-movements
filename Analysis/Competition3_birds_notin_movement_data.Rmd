@@ -14,21 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 # Packages
   require(tidyverse)
   require(here)
-  require(lubridate)
-  require(ggmap)
-  require(gridExtra)
-  require(lme4)
-  require(raster)
 
 # Functions
   `%notin%` <- Negate(`%in%`)
-  
-## Shannon-diversity
-  diversity <- function(x){
-    p <- x/sum(x)
-    -sum(p*log(p))
-  }
-
 ```
 
 
@@ -211,7 +199,7 @@ We relocated 63 Rufous Hummingbirds after the initial capture and PIT tag implan
       yrs=length(unique(year))
     )
   
-# which birds were present over more than 10 days?
+# which birds were present over more than 5 days?
   days_by_bird <- vis_sub %>%
     group_by(bird) %>%
     summarise(
@@ -219,7 +207,7 @@ We relocated 63 Rufous Hummingbirds after the initial capture and PIT tag implan
       yrs = length(unique(year))
     )
   terr_holders <- days_by_bird$bird[
-    which(days_by_bird$days >= 10)
+    which(days_by_bird$days >= 5)
   ]
 
 ```
@@ -294,11 +282,17 @@ We relocated 63 Rufous Hummingbirds after the initial capture and PIT tag implan
   }
   
 # make table for table in supplement
-  vis_by_rdr$Sex <- c("F", "M", "M", "M", "F", "F", "F")
+  vis_by_rdr$ffive <- str_sub(vis_by_rdr$bird, 1, 5)
+  vis_by_rdr <- merge(
+    vis_by_rdr,
+    caps[,c("rfid", "sex")],
+    by.x = "ffive",
+    by.y = "rfid"
+  )
   
   tS1 <- data.frame(
     vis_by_rdr$bird,
-    vis_by_rdr$Sex,
+    vis_by_rdr$sex,
     vis_by_rdr$year,
     vis_by_rdr$reader,
     round(vis_by_rdr$prop_visits, digits = 3)
