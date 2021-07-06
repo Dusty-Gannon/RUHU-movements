@@ -1,7 +1,9 @@
-RUHU movements - Summaries
+Pairing automated mark-recapture and social network models to explore
+the effects of landscape configuration on hummingbird foraging patterns
+- Data summaries
 ================
-Gannon et al.
-May 2021
+D. G. Gannon, A. S. Hadley, S. J. K. Frey
+June 2021
 
 ### Load banding data
 
@@ -496,19 +498,19 @@ weighted\_rfid\_data
  sum(mvs_by_bird$sex == "M")
 ```
 
-    ## [1] 3
+    ## [1] 5
 
 ``` r
  sum(mvs_by_bird$sex == "F")
 ```
 
-    ## [1] 2236
+    ## [1] 2216
 
 ``` r
  sum(mvs_by_bird$age == "AHY")
 ```
 
-    ## [1] 2239
+    ## [1] 2221
 
 ``` r
  inter_comps <- 
@@ -618,6 +620,34 @@ AHY
 <td style="text-align:left;">
 
 F
+
+</td>
+
+</tr>
+
+<tr>
+
+<td style="text-align:left;">
+
+11F27598596F0001
+
+</td>
+
+<td style="text-align:right;">
+
+2
+
+</td>
+
+<td style="text-align:left;">
+
+AHY
+
+</td>
+
+<td style="text-align:left;">
+
+M
 
 </td>
 

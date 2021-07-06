@@ -1,7 +1,7 @@
 ---
-title: "RUHU movements - Summaries"
-author: "Gannon et al."
-date: "May 2021"
+title: "Pairing automated mark-recapture and social network models to explore the effects of landscape configuration on hummingbird foraging patterns - Data summaries"
+author: "D. G. Gannon, A. S. Hadley, S. J. K. Frey"
+date: "June 2021"
 output:
   github_document:
     pandoc_args: --webtex
