@@ -221,7 +221,8 @@ generated quantities{
   caps <- read_csv(file = here("Data", "hja_hummingbird_captures_rfid.csv"))
 ```
 
-    ## Parsed with column specification:
+    ## 
+    ## ── Column specification ────────────────────────────────────────────────────────
     ## cols(
     ##   bdr = col_character(),
     ##   loc = col_character(),
@@ -240,11 +241,7 @@ generated quantities{
 ``` r
   birds_yr <- group_by(caps, yr) %>%
     summarise(n=n())
-```
-
-    ## `summarise()` ungrouping output (override with `.groups` argument)
-
-``` r
+  
   birds_yr$cum_birds <- cumsum(birds_yr$n)
   
 # merge back with movement data
@@ -265,10 +262,10 @@ generated quantities{
  
 # indicator variables for whether a reader is inside the forest
  mvmnts$forest_i <- 0
- mvmnts$forest_i[which(mvmnts$hab_i == "forest")] <- 1
+ mvmnts$forest_i[which(mvmnts$trt_i == "forest")] <- 1
  
  mvmnts$forest_j <- 0
- mvmnts$forest_j[which(mvmnts$hab_j == "forest")] <- 1
+ mvmnts$forest_j[which(mvmnts$trt_j == "forest")] <- 1
  
  mvmnts$forest_ij <- with(mvmnts,
                           (forest_i + forest_j)/2)
@@ -304,7 +301,8 @@ generated quantities{
 ``` r
 # fit the model
   fit <- sampling(soc_net_poisson, data=mod.data, chains=2, 
-                  control=list(adapt_delta=0.9), init=0)
+                  control=list(adapt_delta=0.95), init=0,
+                  iter=10000)
 ```
 
 <div id="refs" class="references">
