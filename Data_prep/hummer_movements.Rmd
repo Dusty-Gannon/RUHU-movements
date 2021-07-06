@@ -127,10 +127,10 @@ $~$
     nrow = nrdrs,
     ncol = length(yrs)
   )
-  rownames(birds_at_feeders) <- rdrs
-  colnames(birds_at_feeders) <- yrs
+  rownames(birds_at_feeders_cnt) <- rdrs
+  colnames(birds_at_feeders_cnt) <- yrs
   
-  birds_at_feeders <- tibble(
+  birds_at_feeders_cnt <- tibble(
     rdr = rdrs,
     birds_2014 = vector(mode = "list", length = nrdrs),
     birds_2015 = vector(mode= "list", length = nrdrs),
@@ -160,21 +160,21 @@ $~$
             yr <- which(yrs == y)
             if(
               df_temp$bird[i] %notin%
-              birds_at_feeders[[yr+1]][[r1]]
+              birds_at_feeders_cnt[[yr+1]][[r1]]
             ){
-            birds_at_feeders[[yr+1]][[r1]] <- 
+            birds_at_feeders_cnt[[yr+1]][[r1]] <- 
               c(
-                birds_at_feeders[[yr+1]][[r1]],
+                birds_at_feeders_cnt[[yr+1]][[r1]],
                 df_temp$bird[i]
               )
             }
             if(
               df_temp$bird[i] %notin%
-              birds_at_feeders[[yr+1]][[r2]]
+              birds_at_feeders_cnt[[yr+1]][[r2]]
             ){
-              birds_at_feeders[[yr+1]][[r2]] <- 
+              birds_at_feeders_cnt[[yr+1]][[r2]] <- 
               c(
-                birds_at_feeders[[yr+1]][[r2]],
+                birds_at_feeders_cnt[[yr+1]][[r2]],
                 df_temp$bird[i]
               )
             }
@@ -182,7 +182,7 @@ $~$
       }
      }
       # get counts of birds at feeders
-      bird_cnts <- map_dbl(as.list(birds_at_feeders[[yr+1]]),
+      bird_cnts <- map_dbl(as.list(birds_at_feeders_cnt[[yr+1]]),
                            ~length(.x))
       # combine with movement dataframe
       if(y=="2014"){
@@ -263,20 +263,20 @@ $~$
 
 ```{r cover types}
 #habitat for reader 1
-  mv_wdist <- merge(mv_wdist, rlocs[,c(1,6)], by.x="reader1", by.y="reader")
-  names(mv_wdist)[which(names(mv_wdist)=="habitat")] <- "hab1"
+  mv_wdist <- merge(mv_wdist, rlocs[,c(1,7)], by.x="reader1", by.y="reader")
+  names(mv_wdist)[which(names(mv_wdist)=="trtmnt")] <- "trt1"
   
 #habitat for reader 2
-  mv_wdist <- merge(mv_wdist, rlocs[,c(1,6)], by.x="reader2", by.y="reader")
-  names(mv_wdist)[which(names(mv_wdist)=="habitat")] <- "hab2"
+  mv_wdist <- merge(mv_wdist, rlocs[,c(1,7)], by.x="reader2", by.y="reader")
+  names(mv_wdist)[which(names(mv_wdist)=="trtmnt")] <- "trt2"
   
-# connectivity reader 1
-  mv_wdist <- merge(mv_wdist, rlocs[,c(1,10)], by.x="reader1", by.y="reader")
-  names(mv_wdist)[which(names(mv_wdist) == "prop_for100")] <- "p_for1"
-  
-# connectivity reader 2
-  mv_wdist <- merge(mv_wdist, rlocs[,c(1,10)], by.x="reader2", by.y="reader")
-  names(mv_wdist)[which(names(mv_wdist) == "prop_for100")] <- "p_for2" 
+# # connectivity reader 1
+#   mv_wdist <- merge(mv_wdist, rlocs[,c(1,10)], by.x="reader1", by.y="reader")
+#   names(mv_wdist)[which(names(mv_wdist) == "prop_for100")] <- "p_for1"
+#   
+# # connectivity reader 2
+#   mv_wdist <- merge(mv_wdist, rlocs[,c(1,10)], by.x="reader2", by.y="reader")
+#   names(mv_wdist)[which(names(mv_wdist) == "prop_for100")] <- "p_for2" 
 
 ```
 
@@ -330,14 +330,12 @@ $~$
                         by.x="edgename",
                         by.y="ID")
 # reorder
-   cols.order <- c("reader1", "reader2", "year", "hab1", "hab2", 
-                   "p_for1", "p_for2", "dist.km", "forest", "count",
-                   "birds1", "birds2")
+   cols.order <- c("reader1", "reader2", "year", "trt1", "trt2", 
+                   "birds1", "birds2", "dist.km", "forest", "count")
    mv_noedgename <- mv_wpropfor[,cols.order]
    
-  names(mv_noedgename) <- c("reader_i", "reader_j", "year", "hab_i", "hab_j",
-                  "pfor_100m_i", "pfor_100m_j", "dist_ij", "pfor_ij", "count",
-                  "nbirds_i", "nbirds_j")
+  names(mv_noedgename) <- c("reader_i", "reader_j", "year", "trt_i", "trt_j",
+                  "birds_i", "birds_j", "dist_ij", "pfor_ij", "count")
   
 # now create a dyad identifier
   mv_noedgename$dyad <- NA
@@ -346,6 +344,7 @@ $~$
     mv_noedgename$dyad[i] <- paste(dyad_i, collapse = '-')
   }
   
+# re-order columns to put edgename in 3rd position
   mv_noedgename <- mv_noedgename[,c(
     1,2, ncol(mv_noedgename),
     3:(ncol(mv_noedgename)-1)
