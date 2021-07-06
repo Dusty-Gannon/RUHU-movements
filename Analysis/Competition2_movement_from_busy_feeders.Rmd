@@ -15,10 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
   require(tidyverse)
   require(here)
   require(lubridate)
-  require(ggmap)
-  require(gridExtra)
   require(lme4)
-  require(raster)
 
 # Functions
   `%notin%` <- Negate(`%in%`)
@@ -115,24 +112,26 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 # sort by feeder then day
-  vis_rdr_sort <- vis[
-    order(vis$reader, vis$date, vis$time),
-  ]
-  vis_rdr_sort$datetime <- ymd_hms(
-    paste(vis_rdr_sort$date, vis_rdr_sort$time, sep=" ")
+  vis$datetime <- ymd_hms(
+    paste(vis$date, vis$time, sep=" ")
   )
-  vis_rdr_sort$date_num <- as.numeric(vis_rdr_sort$datetime)
+  vis_rdr_sort <- vis[
+    order(vis$reader, vis$datetime),
+  ]
 
+# get lists of readers and years
   rdrs <- unique(vis_rdr_sort$reader)
   yrs <- c(2014,2015,2016,2017)
   
+# initialize the new dataframe
   rdr_use <- data.frame(
     datetime = vis_rdr_sort$datetime[1],
     num_birds = NA,
     rdr=NA
   )
   
-  
+# loop through readers for each year and quantify the number of birds
+# using each feeder in each ten-minute intervals
 for(r in rdrs){
   for(y in yrs){
     df_sub <- subset(vis_rdr_sort, reader==r & year==y)
@@ -140,9 +139,10 @@ for(r in rdrs){
       rdr_use_times <- df_sub$datetime[1]
       rdr_use_birds <- NA
       rdr_use_yr <- NA
-  
+      # define window
       lower <- df_sub$datetime[1]
       upper <- df_sub$datetime[1]+600
+      # loop through, adding 10min to window each time
       while (lower < df_sub$datetime[nrow(df_sub)]) {
         df_sub_sub <- df_sub[
           which(
@@ -150,23 +150,26 @@ for(r in rdrs){
             df_sub$datetime <= upper
           ),
         ]
-    
+        # timestamp
         rdr_use_times <- c(rdr_use_times, lower)
+        # count number of birds in window
         rdr_use_birds <- c(
           rdr_use_birds,
           length(unique(df_sub_sub$bird))
         )
+        # record year
         rdr_use_yr <- c(rdr_use_yr, y)
+        # increment the window
         lower <- lower+600
         upper <- upper+600
       }
-      
+      # create dataframe
       temp <- data.frame(
         datetime = rdr_use_times[-1],
         num_birds = rdr_use_birds[-1],
         rdr = r
       )
-      
+      # add to running data
       rdr_use <- rbind(
         rdr_use,
         temp
@@ -182,13 +185,7 @@ for(r in rdrs){
 ```{r}
 
 # sort by bird, then by time
-  vis_bird_sort <- vis[order(vis$bird, vis$date, vis$seconds), ]
-
-# add datetime
-  vis_bird_sort$datetime <- ymd_hms(
-    paste(vis_bird_sort$date, vis_bird_sort$time, sep=" ")
-  )
-  vis_bird_sort$date_num <- as.numeric(vis_bird_sort$datetime)
+  vis_bird_sort <- vis[order(vis$bird, vis$datetime), ]
 
 # create empty dataframe
  mvs_by_bird <- as.data.frame(
@@ -262,7 +259,7 @@ for(r in rdrs){
   mving_birds$f.bird <- as.factor(mving_birds$bird)
   
   m1 <- glmer(
-    move~rdr_use + (1|bird), 
+    move~rdr_use + (rdr_use|bird), 
     family = "binomial",
     data = mving_birds
   )
@@ -273,19 +270,57 @@ for(r in rdrs){
     1/(1+exp(-(b0+b1*x)))
   }
   
-ggplot(data = mving_birds)+
-    geom_jitter(aes(x=rdr_use, y=move),
-               alpha=0.2, width = 0.5, height = 0)+
-    geom_function(fun = pred_logistic, color="blue")+
+# get random slopes and intercepts for each bird
+res <- as.data.frame(ranef(m1)$bird)
+res$bird <- rownames(res)
+res$first5 <- str_sub(res$bird, 1, 5)
+res <- merge(
+  res,
+  caps[,c("sex", "rfid")],
+  by.x = "first5",
+  by.y = "rfid"
+)
+
+# combine this information into a plot
+  x <- map(
+    1:nrow(res),
+    ~rep(seq(min(mving_birds$rdr_use), max(mving_birds$rdr_use), length.out = 100))
+  ) 
+
+# predict for each bird
+  y <- map(
+    1:nrow(res),
+    ~pred_logistic(
+      x[[.x]], 
+      b0=m1@beta[1] + res$`(Intercept)`[.x],
+      b1=m1@beta[2] + res$rdr_use[.x]
+    )
+  )
+  
+# now unlist into dataframe
+  df_plot <- data.frame(
+    x=unlist(x),
+    y = unlist(y),
+    bird = rep(res$first5, each=length(x[[1]])),
+    sex = rep(res$sex, each=length(x[[1]]))
+  )
+
+
+# plot
+ leave_plot <- ggplot(data = df_plot, aes(color=sex))+
+    geom_line(aes(x=x,y=y, group=bird), alpha=0.8)+
+    geom_function(fun = pred_logistic, color="black", size=2)+
     theme_classic()+
     xlab("Number of birds using a feeder")+
     ylab("P(focal bird leaves)")
+  
+
 
 # png(filename = here(
 #   "Figures",
 #   "competition_plot.png"
-# ), width = 900, height = 900, res = 300, units="px")
-#   comp_plot
+# ), width = 1200, height = 900, res = 300, units="px")
+#   leave_plot
 # dev.off()
 
 ```
