@@ -1,0 +1,106 @@
+---
+title: "Pairing automated mark-recapture and social network models to explore the effects of landscape configuration on hummingbird foraging patterns: Subsetting raw read data for separate visits"
+author: "D. G. Gannon, A. S. Hadley, S. J. K. Frey"
+date: "May 2021"
+output:
+  github_document:
+    pandoc_args: --webtex
+bibliography: /Users/dusty/Documents/zotero_library.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+
+  require(tidyverse)
+  require(lubridate)
+  require(here)
+
+ `%notin%` <- Negate(`%in%`)
+
+```
+
+## Data
+
+```{r}
+
+# load raw read data
+  rds <- read.table(
+    file = here(
+      "Data",
+      "all_reads.txt"
+    ),
+    header = T,
+    sep = "\t"
+  )
+
+  source(file = here(
+    "Data_prep",
+    "list_of_rfid_tests_and_glitches.R"
+  ))
+
+# rename columns
+  names(rds) <- c(
+    "tag",
+    "date",
+    "time",
+    "seconds",
+    "year",
+    "site"
+  )
+  
+```
+
+From these raw data, we only want records of what we will call "separate" visits, which we (arbitrarily) call records at a feeder that are separated by at least 30s or are records of different birds. To do this, we sort the data by location, date, and time and loop through to remove records that are all from the same "visit."
+
+```{r}
+
+# order records by bird, then date, then time
+  rds_sort <- rds[
+    order(rds$year, rds$site, rds$date, rds$seconds),
+  ]
+
+# loop through to pull out separate visits
+## create empty dataframe
+  vis <- as.data.frame(
+    matrix(
+      data = NA,
+      nrow = nrow(rds_sort),
+      ncol = ncol(rds_sort)
+    )
+  )
+  names(vis) <- names(rds_sort)
+  vis[1,] <- rds_sort[1,]
+  
+## now loop through
+  for(i in 2:nrow(rds_sort)){
+    if(
+      (rds_sort$tag[i] != rds_sort$tag[i-1]) |
+      (rds_sort$date[i] != rds_sort$date[i-1]) |
+      ((rds_sort$seconds[i] - rds_sort$seconds[i-1]) > 30)
+    ){
+      vis[i,] <- rds_sort[i,]
+    }
+  }
+  
+# remove NA rows
+  vis_complete <- na.omit(vis)
+  
+#  Sanity check 
+#   which(duplicated(vis_complete[,c("tag", "date", "time")]))
+  
+  # which(vis_complete$tag %in% tests_n_glitches)
+  
+  write.table(
+    vis_complete,
+    file = here(
+      "Data",
+      "all_visits.txt"
+    ),
+    quote = F,
+    row.names = F,
+    sep = "\t"
+  )
+
+```
+
+
