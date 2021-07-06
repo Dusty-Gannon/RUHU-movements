@@ -24,11 +24,11 @@ We utilized a class of generalized regression models developed for social networ
 
 * `hja_reader_locations_centercomb.txt`: Data on feeder locations and characteristics of the locations (tab-separated data).
 
-* `total_movements_by_year.tsv`: Data on the total number of movements between each pair of feeders for each year the feeders were out on the landscape. These data are summaries of the raw data that are used to fit the sender-receiver model (see [code for fitting the model here](https://github.com/Dusty-Gannon/RUHU-movements/blob/main/Analysis/Bilinear_model_bird_movement.md)). Raw data will be made available ASAP on the [H. J. Andrews LTER data portal](http://andlter.forestry.oregonstate.edu/data/abstract.aspx?dbcode=SA028). Code to get from the raw data to this dataset can be found in the [Data prep folder](https://github.com/Dusty-Gannon/RUHU-movements/tree/main/Data_prep).
+* `total_movements_by_year.tsv`: Data on the total number of movements between each pair of feeders for each year the feeders were out on the landscape. These data are summaries of the raw data that are used to fit the sender-receiver model (see [code for fitting the model here](https://github.com/Dusty-Gannon/RUHU-movements/blob/main/Analysis/Bilinear_model_bird_movement.md)). Raw data will be made available ASAP on the [H. J. Andrews LTER Data Portal](http://andlter.forestry.oregonstate.edu/data/abstract.aspx?dbcode=SA028). Code to get from the raw data to this dataset can be found in the [Data prep folder](https://github.com/Dusty-Gannon/RUHU-movements/tree/main/Data_prep).
 
 ### [Data_prep](https://github.com/Dusty-Gannon/RUHU-movements/tree/main/Data_prep) folder
 
-* `raw_reads_to_visits.Rmd`: Documents our process of removing records that all belong to the same visit to the feeder. This is the first step to reproducing our results if one were to download the raw data from the [H.J. Andrews Data Portal](https://andrewsforest.oregonstate.edu/data) (database code SA028).
+* `raw_reads_to_visits.Rmd`: Documents our process of removing records that all belong to the same visit to the feeder. This is the first step to reproducing our results if one were to download the raw data from the [H.J. Andrews Data Portal](http://andlter.forestry.oregonstate.edu/data/abstract.aspx?dbcode=SA028).
 
 * `hummer_movements.(R)md`: Documents code used to get from "visit data" (records of birds separated by at least 30s) to the movement data (`total_movements_by_year.tsv`). This is the second step to reproducting our results.
 
